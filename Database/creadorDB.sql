@@ -1,6 +1,3 @@
-CREATE DATABASE tiusr15pl_RaicesCafeVivero;
-GO
-
 USE tiusr15pl_RaicesCafeVivero;
 GO
 
