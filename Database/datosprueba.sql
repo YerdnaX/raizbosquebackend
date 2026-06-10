@@ -171,4 +171,31 @@ VALUES
 (4, 'Actualización de inventario', 'Productos', 'Se actualizaron existencias del vivero.'),
 (3, 'Confirmación de reservación', 'Reservaciones', 'Empleado confirmó una reservación.'),
 (4, 'Creación de promoción', 'Promociones', 'Se creó la promoción Combo Café + Planta.');
+
+-- ============================================================
+-- CORRECCIONES: garantizar que las categorías del vivero
+-- tengan Tipo = 'Vivero' y que los productos apunten a ellas
+-- ============================================================
+
+UPDATE Categorias
+SET Tipo = 'Vivero'
+WHERE NombreCategoria IN ('Macetas', 'Fertilizantes', 'Herramientas');
+
+UPDATE p
+SET p.IdCategoria = c.IdCategoria
+FROM Productos p
+INNER JOIN Categorias c ON c.NombreCategoria = 'Macetas'
+WHERE p.Nombre IN ('Maceta de barro mediana', 'Maceta decorativa blanca');
+
+UPDATE p
+SET p.IdCategoria = c.IdCategoria
+FROM Productos p
+INNER JOIN Categorias c ON c.NombreCategoria = 'Fertilizantes'
+WHERE p.Nombre = 'Fertilizante orgánico';
+
+UPDATE p
+SET p.IdCategoria = c.IdCategoria
+FROM Productos p
+INNER JOIN Categorias c ON c.NombreCategoria = 'Herramientas'
+WHERE p.Nombre = 'Kit de jardinería básico';
 GO

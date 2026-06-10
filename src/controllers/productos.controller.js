@@ -62,6 +62,24 @@ async function getPlantaDelMes(req, res) {
   }
 }
 
+async function getProductosViveroProductos(req, res) {
+  try {
+    const pool = await getConnection();
+    const result = await pool.request().query(`
+      SELECT
+        p.IdProducto, p.Nombre, p.Descripcion, p.Precio, p.Imagen, p.Stock,
+        c.NombreCategoria
+      FROM Productos p
+      INNER JOIN Categorias c ON p.IdCategoria = c.IdCategoria
+      WHERE p.TipoProducto = 'ProductoVivero' AND p.Disponible >= 1
+      ORDER BY c.NombreCategoria, p.Nombre
+    `);
+    res.json({ success: true, productos: result.recordset });
+  } catch (error) {
+    res.status(500).json({ error: 'Error al obtener los productos del vivero' });
+  }
+}
+
 async function getProductoPorId(req, res) {
   const id = parseInt(req.params.id);
   if (isNaN(id)) return res.status(400).json({ error: 'ID inválido' });
@@ -89,4 +107,4 @@ async function getProductoPorId(req, res) {
   }
 }
 
-module.exports = { getProductosVivero, getProductosRestaurante, getPlantaDelMes, getProductoPorId };
+module.exports = { getProductosVivero, getProductosRestaurante, getPlantaDelMes, getProductoPorId, getProductosViveroProductos };
