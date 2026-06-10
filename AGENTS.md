@@ -212,6 +212,7 @@ Prefijos recomendados por recurso:
 
 ```txt
 /api/health
+/api/auth
 /api/productos
 /api/plantas
 /api/categorias
@@ -227,7 +228,41 @@ Prefijos recomendados por recurso:
 
 ---
 
-# 9. Consultas SQL
+# 9. URL base de la API
+
+La API está publicada en Render en la siguiente URL:
+
+```txt
+https://raizbosquebackend.onrender.com
+```
+
+Esta es la URL base que debe usarse siempre al:
+
+- Referenciar endpoints en documentación.
+- Construir ejemplos de curl.
+- Indicar URLs al equipo de la app móvil.
+
+Ejemplos de endpoints completos:
+
+```txt
+GET  https://raizbosquebackend.onrender.com/
+GET  https://raizbosquebackend.onrender.com/api/health/db
+POST https://raizbosquebackend.onrender.com/api/auth/login
+```
+
+Para desarrollo local usar:
+
+```txt
+http://localhost:3000
+```
+
+Nunca usar localhost como URL de referencia en documentación o ejemplos que van al equipo de la app móvil.
+
+> Nota: Render en el plan gratuito puede tardar ~30 segundos en responder la primera petición si el servicio estuvo inactivo.
+
+---
+
+# 10. Consultas SQL
 
 Usar consultas SQL simples directamente con `mssql`.
 
@@ -258,7 +293,7 @@ No concatenar parámetros directamente en el string SQL:
 
 ---
 
-# 10. Base de datos
+# 11. Base de datos
 
 La conexión a SQL Server está centralizada en `src/config/db.js`.
 
@@ -276,7 +311,7 @@ Importar `sql` solo cuando se necesiten tipos para `.input()`.
 
 ---
 
-# 11. Tablas disponibles en la base de datos
+# 12. Tablas disponibles en la base de datos
 
 La base de datos se llama `tiusr15pl_RaicesCafeVivero`.
 
@@ -313,7 +348,7 @@ Si se necesita conocer la estructura exacta de una tabla, revisar `Database/crea
 
 ---
 
-# 12. Variables de entorno
+# 13. Variables de entorno
 
 Las credenciales y configuración sensible deben estar en `.env`.
 
@@ -350,7 +385,7 @@ app.listen(3000, ...);
 
 ---
 
-# 13. Respuestas de la API
+# 14. Respuestas de la API
 
 Las respuestas deben ser JSON consistentes.
 
@@ -386,7 +421,7 @@ Usar códigos HTTP correctos:
 
 ---
 
-# 14. Manejo de errores
+# 15. Manejo de errores
 
 Usar try/catch en todos los controladores.
 
@@ -412,7 +447,7 @@ Incorrecto:
 
 ---
 
-# 15. Comentarios
+# 16. Comentarios
 
 Escribir comentarios solo cuando expliquen una razón importante.
 
@@ -433,7 +468,7 @@ Evitar comentarios obvios.
 
 ---
 
-# 16. Scripts del proyecto
+# 17. Scripts del proyecto
 
 Los scripts disponibles en `package.json` son:
 
@@ -446,7 +481,7 @@ No agregar scripts sin necesidad.
 
 ---
 
-# 17. Deploy en Render
+# 18. Deploy en Render
 
 El proyecto está configurado para publicarse en Render como Web Service.
 
@@ -470,7 +505,7 @@ No agregar las credenciales reales al README.
 
 ---
 
-# 18. Qué NO hacer
+# 19. Qué NO hacer
 
 No hacer sobreingeniería.
 
@@ -493,7 +528,7 @@ Crear rutas sin revisar la estructura de la DB
 
 ---
 
-# 19. Reglas para agentes de IA
+# 20. Reglas para agentes de IA
 
 Cuando un agente de IA trabaje en este proyecto, debe:
 
@@ -515,7 +550,7 @@ Cuando un agente de IA trabaje en este proyecto, debe:
 
 ---
 
-# 20. Estilo de respuesta esperado del agente
+# 21. Estilo de respuesta esperado del agente
 
 Cuando el agente explique cambios, debe usar un formato claro.
 
@@ -557,7 +592,7 @@ Preferir explicaciones concretas, cortas y aplicables.
 
 ---
 
-# 21. Regla final
+# 22. Regla final
 
 Este es un proyecto académico.
 
@@ -570,3 +605,5 @@ Mantener el código simple.
 Mantener el proyecto ordenado.
 
 No diseñar para problemas que todavía no existen.
+
+Al implementar una nueva ruta o cambio sobre alguna ruta existente brinde el CURL apropiado para probar
