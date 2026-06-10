@@ -12,7 +12,7 @@ async function getProductosVivero(req, res) {
       FROM Productos p
       INNER JOIN Categorias c ON p.IdCategoria = c.IdCategoria
       LEFT JOIN Plantas pl ON p.IdProducto = pl.IdProducto
-      WHERE c.Tipo = 'Vivero' AND p.TipoProducto = 'Planta' AND p.Disponible = 1
+      WHERE c.Tipo = 'Vivero' AND (p.TipoProducto = 'Planta' OR p.TipoProducto = 'ProductoVivero') AND p.Disponible >= 1 
       ORDER BY p.IdProducto
     `);
     res.json({ success: true, productos: result.recordset });
@@ -30,7 +30,7 @@ async function getProductosRestaurante(req, res) {
         c.NombreCategoria
       FROM Productos p
       INNER JOIN Categorias c ON p.IdCategoria = c.IdCategoria
-      WHERE c.Tipo = 'Restaurante' AND p.Disponible = 1
+      WHERE c.Tipo = 'Restaurante' AND p.Disponible >= 1
       ORDER BY p.IdProducto
     `);
     res.json({ success: true, productos: result.recordset });
@@ -50,7 +50,7 @@ async function getPlantaDelMes(req, res) {
       FROM Productos p
       INNER JOIN Categorias c ON p.IdCategoria = c.IdCategoria
       INNER JOIN Plantas pl ON p.IdProducto = pl.IdProducto
-      WHERE c.Tipo = 'Vivero' AND p.TipoProducto = 'Planta' AND p.Disponible = 1
+      WHERE c.Tipo = 'Vivero' AND (p.TipoProducto = 'Planta' OR p.TipoProducto = 'ProductoVivero') AND p.Disponible >= 1
       ORDER BY p.FechaRegistro DESC
     `);
     if (result.recordset.length === 0) {
@@ -78,7 +78,7 @@ async function getProductoPorId(req, res) {
         FROM Productos p
         INNER JOIN Categorias c ON p.IdCategoria = c.IdCategoria
         LEFT JOIN Plantas pl ON p.IdProducto = pl.IdProducto
-        WHERE p.IdProducto = @id AND p.Disponible = 1
+        WHERE p.IdProducto = @id AND p.Disponible >= 1
       `);
     if (result.recordset.length === 0) {
       return res.status(404).json({ error: 'Producto no encontrado' });
