@@ -4,25 +4,26 @@ async function obtenerCarrito(req, res) {
   const { idUsuario } = req.params;
   try {
     const pool = await getConnection();
-    const result = await pool.request()
+
+    const carritoResult = await pool.request()
       .input('idUsuario', sql.Int, idUsuario)
+      .query(`SELECT TOP 1 IdCarrito FROM Carritos WHERE IdUsuario = @idUsuario AND Estado = 'Activo' ORDER BY IdCarrito ASC`);
+
+    if (carritoResult.recordset.length === 0) {
+      return res.json({ success: true, idCarrito: null, items: [] });
+    }
+
+    const idCarrito = carritoResult.recordset[0].IdCarrito;
+
+    const result = await pool.request()
+      .input('idCarrito', sql.Int, idCarrito)
       .query(`
-        SELECT
-          cd.IdDetalle,
-          cd.IdProducto,
-          p.Nombre,
-          p.Imagen,
-          cd.Cantidad,
-          cd.PrecioUnitario,
-          cd.Subtotal,
-          c.IdCarrito
+        SELECT cd.IdDetalle, cd.IdProducto, p.Nombre, p.Imagen, cd.Cantidad, cd.PrecioUnitario, cd.Subtotal
         FROM CarritoDetalle cd
         INNER JOIN Productos p ON cd.IdProducto = p.IdProducto
-        INNER JOIN Carritos c ON cd.IdCarrito = c.IdCarrito
-        WHERE c.IdUsuario = @idUsuario AND c.Estado = 'Activo'
+        WHERE cd.IdCarrito = @idCarrito
       `);
 
-    const idCarrito = result.recordset.length > 0 ? result.recordset[0].IdCarrito : null;
     const items = result.recordset.map(row => ({
       IdDetalle: row.IdDetalle,
       IdProducto: row.IdProducto,
@@ -49,7 +50,7 @@ async function agregarItem(req, res) {
 
     const carritoResult = await pool.request()
       .input('idUsuario', sql.Int, idUsuario)
-      .query(`SELECT TOP 1 IdCarrito FROM Carritos WHERE IdUsuario = @idUsuario AND Estado = 'Activo'`);
+      .query(`SELECT TOP 1 IdCarrito FROM Carritos WHERE IdUsuario = @idUsuario AND Estado = 'Activo' ORDER BY IdCarrito ASC`);
 
     let idCarrito;
     if (carritoResult.recordset.length === 0) {
