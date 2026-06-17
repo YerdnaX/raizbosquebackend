@@ -9,6 +9,7 @@ const usuariosRoutes = require('./routes/usuarios.routes');
 const carritoRoutes = require('./routes/carrito.routes');
 const comprasRoutes = require('./routes/compras.routes');
 const reservacionesRoutes = require('./routes/reservaciones.routes');
+const jardinRoutes = require('./routes/jardin.routes');
 
 const app = express();
 
@@ -27,5 +28,6 @@ app.use('/api/usuarios', usuariosRoutes);
 app.use('/api/carrito', carritoRoutes);
 app.use('/api/compras', comprasRoutes);
 app.use('/api/reservaciones', reservacionesRoutes);
+app.use('/api/jardin', jardinRoutes);
 
 module.exports = app;
