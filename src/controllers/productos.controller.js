@@ -80,6 +80,27 @@ async function getProductosViveroProductos(req, res) {
   }
 }
 
+async function getPlatoDelDia(req, res) {
+  try {
+    const pool = await getConnection();
+    const result = await pool.request().query(`
+      SELECT TOP 1
+        p.IdProducto, p.Nombre, p.Descripcion, p.Precio, p.Imagen, p.Stock,
+        c.NombreCategoria
+      FROM Productos p
+      INNER JOIN Categorias c ON p.IdCategoria = c.IdCategoria
+      WHERE c.Tipo = 'Restaurante' AND p.Disponible >= 1
+      ORDER BY p.FechaRegistro DESC
+    `);
+    if (result.recordset.length === 0) {
+      return res.status(404).json({ error: 'No hay plato del día disponible' });
+    }
+    res.json({ success: true, plato: result.recordset[0] });
+  } catch (error) {
+    res.status(500).json({ error: 'Error al obtener el plato del día' });
+  }
+}
+
 async function getProductoPorId(req, res) {
   const id = parseInt(req.params.id);
   if (isNaN(id)) return res.status(400).json({ error: 'ID inválido' });
@@ -107,4 +128,4 @@ async function getProductoPorId(req, res) {
   }
 }
 
-module.exports = { getProductosVivero, getProductosRestaurante, getPlantaDelMes, getProductoPorId, getProductosViveroProductos };
+module.exports = { getProductosVivero, getProductosRestaurante, getPlantaDelMes, getPlatoDelDia, getProductoPorId, getProductosViveroProductos };
