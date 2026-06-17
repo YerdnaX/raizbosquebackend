@@ -71,4 +71,57 @@ async function realizarCompra(req, res) {
   }
 }
 
-module.exports = { realizarCompra };
+async function obtenerHistorial(req, res) {
+  const { idUsuario } = req.params;
+  try {
+    const pool = await getConnection();
+
+    const result = await pool.request()
+      .input('idUsuario', sql.Int, idUsuario)
+      .query(`
+        SELECT
+          c.IdCompra, c.FechaCompra,
+          c.Subtotal AS CompraSubtotal, c.Impuesto, c.Total,
+          c.MetodoEntrega, c.DireccionEntrega, c.EstadoCompra,
+          cd.IdProducto, p.Nombre AS NombreProducto, p.Imagen,
+          cd.Cantidad, cd.PrecioUnitario, cd.Subtotal AS ItemSubtotal
+        FROM Compras c
+        INNER JOIN CompraDetalle cd ON c.IdCompra = cd.IdCompra
+        INNER JOIN Productos p ON cd.IdProducto = p.IdProducto
+        WHERE c.IdUsuario = @idUsuario
+        ORDER BY c.FechaCompra DESC, c.IdCompra DESC
+      `);
+
+    const comprasMap = new Map();
+    for (const row of result.recordset) {
+      if (!comprasMap.has(row.IdCompra)) {
+        comprasMap.set(row.IdCompra, {
+          IdCompra: row.IdCompra,
+          FechaCompra: row.FechaCompra,
+          Subtotal: parseFloat(row.CompraSubtotal),
+          Impuesto: parseFloat(row.Impuesto),
+          Total: parseFloat(row.Total),
+          MetodoEntrega: row.MetodoEntrega,
+          DireccionEntrega: row.DireccionEntrega,
+          EstadoCompra: row.EstadoCompra,
+          items: [],
+        });
+      }
+      comprasMap.get(row.IdCompra).items.push({
+        IdProducto: row.IdProducto,
+        Nombre: row.NombreProducto,
+        Imagen: row.Imagen,
+        Cantidad: row.Cantidad,
+        PrecioUnitario: parseFloat(row.PrecioUnitario),
+        Subtotal: parseFloat(row.ItemSubtotal),
+      });
+    }
+
+    res.json({ success: true, compras: Array.from(comprasMap.values()) });
+  } catch (error) {
+    console.error('Error al obtener historial:', error);
+    res.status(500).json({ success: false, message: 'Error al obtener el historial' });
+  }
+}
+
+module.exports = { realizarCompra, obtenerHistorial };
