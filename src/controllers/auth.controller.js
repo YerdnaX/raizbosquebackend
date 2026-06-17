@@ -34,10 +34,10 @@ async function login(req, res) {
 }
 
 async function registro(req, res) {
-  const { nombreCompleto, correo, telefono, contrasena } = req.body;
+  const { nombre, apellidos, correo, telefono, direccion, contrasena } = req.body;
 
-  if (!nombreCompleto || !correo || !contrasena) {
-    return res.status(400).json({ error: 'Nombre, correo y contraseña son requeridos' });
+  if (!nombre || !apellidos || !correo || !contrasena) {
+    return res.status(400).json({ error: 'Nombre, apellidos, correo y contraseña son requeridos' });
   }
 
   try {
@@ -52,13 +52,15 @@ async function registro(req, res) {
     }
 
     await pool.request()
-      .input('nombre', sql.VarChar, nombreCompleto)
+      .input('nombre', sql.VarChar, nombre)
+      .input('apellidos', sql.VarChar, apellidos)
       .input('correo', sql.VarChar, correo)
       .input('telefono', sql.VarChar, telefono || '')
+      .input('direccion', sql.VarChar, direccion || '')
       .input('contrasena', sql.VarChar, contrasena)
       .query(`
-        INSERT INTO Usuarios (IdRol, Nombre, Apellidos, Correo, Telefono, Contrasena)
-        VALUES (1, @nombre, '', @correo, @telefono, @contrasena)
+        INSERT INTO Usuarios (IdRol, Nombre, Apellidos, Correo, Telefono, Direccion, Contrasena)
+        VALUES (1, @nombre, @apellidos, @correo, @telefono, @direccion, @contrasena)
       `);
 
     res.status(201).json({ success: true, mensaje: 'Cuenta creada correctamente' });
