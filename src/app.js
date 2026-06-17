@@ -7,6 +7,7 @@ const authRoutes = require('./routes/auth.routes');
 const productosRoutes = require('./routes/productos.routes');
 const usuariosRoutes = require('./routes/usuarios.routes');
 const carritoRoutes = require('./routes/carrito.routes');
+const comprasRoutes = require('./routes/compras.routes');
 
 const app = express();
 
@@ -23,5 +24,6 @@ app.use('/api/auth', authRoutes);
 app.use('/api/productos', productosRoutes);
 app.use('/api/usuarios', usuariosRoutes);
 app.use('/api/carrito', carritoRoutes);
+app.use('/api/compras', comprasRoutes);
 
 module.exports = app;
