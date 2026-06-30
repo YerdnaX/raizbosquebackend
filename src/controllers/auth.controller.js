@@ -233,12 +233,19 @@ async function enviarCodigoRegistro(req, res) {
         VALUES (@correo, @hash, 'REGISTRO', @expira)
       `);
 
-    await enviarCodigoVerificacion(correo, codigo);
+    try {
+      await enviarCodigoVerificacion(correo, codigo);
+    } catch (emailError) {
+      console.error('[auth.enviarCodigoRegistro] ERROR DE EMAIL:', emailError.message);
+      console.error('[auth.enviarCodigoRegistro] EMAIL STACK:', emailError.stack);
+      return res.status(500).json({ codigo: 'EMAIL_ERROR', error: 'No se pudo enviar el correo. Intente más tarde.', detalle: emailError.message });
+    }
 
     res.json({ success: true, mensaje: 'Código enviado al correo' });
   } catch (error) {
-    console.error('[auth.enviarCodigoRegistro]', error.message);
-    res.status(500).json({ codigo: 'SERVER_ERROR', error: 'Error al enviar el código' });
+    console.error('[auth.enviarCodigoRegistro] ERROR DE BASE DE DATOS:', error.message);
+    console.error('[auth.enviarCodigoRegistro] DB STACK:', error.stack);
+    res.status(500).json({ codigo: 'SERVER_ERROR', error: 'Error interno del servidor', detalle: error.message });
   }
 }
 
