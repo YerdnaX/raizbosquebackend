@@ -258,7 +258,16 @@ async function enviarCodigoRegistro(req, res) {
       console.error('[auth.enviarCodigoRegistro] EMAIL CODE:', emailError.code || 'SIN_CODIGO');
       console.error('[auth.enviarCodigoRegistro] EMAIL COMMAND:', emailError.command || 'SIN_COMMAND');
       console.error('[auth.enviarCodigoRegistro] EMAIL STACK:', emailError.stack);
-      return res.status(500).json({ codigo: 'EMAIL_ERROR', error: 'No se pudo enviar el correo. Intente más tarde.', detalle: emailError.message });
+      const detalle = emailError?.message || 'Error al enviar correo';
+      const esProblemaRedSmtp = (emailError?.code === 'ESOCKET') || /ENETUNREACH|ECONNREFUSED|ETIMEDOUT/i.test(detalle);
+      if (esProblemaRedSmtp) {
+        return res.status(503).json({
+          codigo: 'EMAIL_NETWORK_ERROR',
+          error: 'No fue posible conectar al servidor de correo.',
+          detalle,
+        });
+      }
+      return res.status(500).json({ codigo: 'EMAIL_ERROR', error: 'No se pudo enviar el correo. Intente más tarde.', detalle });
     }
 
     res.json({ success: true, mensaje: 'Código enviado al correo' });
