@@ -237,6 +237,8 @@ async function enviarCodigoRegistro(req, res) {
       await enviarCodigoVerificacion(correo, codigo);
     } catch (emailError) {
       console.error('[auth.enviarCodigoRegistro] ERROR DE EMAIL:', emailError.message);
+      console.error('[auth.enviarCodigoRegistro] EMAIL CODE:', emailError.code || 'SIN_CODIGO');
+      console.error('[auth.enviarCodigoRegistro] EMAIL COMMAND:', emailError.command || 'SIN_COMMAND');
       console.error('[auth.enviarCodigoRegistro] EMAIL STACK:', emailError.stack);
       return res.status(500).json({ codigo: 'EMAIL_ERROR', error: 'No se pudo enviar el correo. Intente más tarde.', detalle: emailError.message });
     }

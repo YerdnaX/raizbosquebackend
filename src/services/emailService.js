@@ -5,13 +5,18 @@ function crearTransportador() {
     host: process.env.EMAIL_HOST,
     port: Number(process.env.EMAIL_PORT) || 587,
     secure: process.env.EMAIL_SECURE === 'true',
+    requireTLS: process.env.EMAIL_SECURE !== 'true',
     auth: {
       user: process.env.EMAIL_USER,
       pass: process.env.EMAIL_PASS,
     },
-    connectionTimeout: 10000,
-    greetingTimeout: 10000,
-    socketTimeout: 10000,
+    // Render and some SMTP providers can be slower during cold starts.
+    connectionTimeout: 30000,
+    greetingTimeout: 30000,
+    socketTimeout: 30000,
+    tls: {
+      minVersion: 'TLSv1.2',
+    },
   });
 }
 
