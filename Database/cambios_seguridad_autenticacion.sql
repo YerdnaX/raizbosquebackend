@@ -12,6 +12,15 @@ GO
 -- 1. COLUMNAS NUEVAS EN Usuarios
 -- ------------------------------------------------------------
 
+-- Hacer nullable la columna legado Contrasena (el nuevo sistema usa ContrasenaHash)
+DECLARE @isNullable NVARCHAR(3) = (
+    SELECT IS_NULLABLE FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_NAME = 'Usuarios' AND COLUMN_NAME = 'Contrasena'
+);
+IF @isNullable = 'NO'
+    ALTER TABLE Usuarios ALTER COLUMN Contrasena VARCHAR(255) NULL;
+GO
+
 IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME='Usuarios' AND COLUMN_NAME='NombreUsuario')
     ALTER TABLE Usuarios ADD NombreUsuario VARCHAR(100) NULL;
 GO

@@ -1,7 +1,11 @@
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const { getConnection, sql } = require('../config/db');
-const { enviarCodigoVerificacion, enviarCodigoRecuperacion, enviarNombreUsuario } = require('../services/emailService');
+const {
+  enviarCodigoVerificacion,
+  enviarCodigoRecuperacion: emailEnviarCodigoRecuperacion,
+  enviarNombreUsuario,
+} = require('../services/emailService');
 
 const BCRYPT_ROUNDS = 10;
 const EXPIRACION_CONTRASENA_DIAS = 120;
@@ -524,7 +528,7 @@ async function enviarCodigoRecuperacion(req, res) {
           VALUES (@correo, @hash, 'RECUPERACION', @expira)
         `);
 
-      await enviarCodigoRecuperacion(correo, codigo);
+      await emailEnviarCodigoRecuperacion(correo, codigo);
     }
 
     // Respuesta idéntica independientemente de si el correo existe o no
