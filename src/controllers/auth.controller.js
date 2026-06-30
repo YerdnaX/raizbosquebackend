@@ -11,6 +11,7 @@ const BCRYPT_ROUNDS = 10;
 const EXPIRACION_CONTRASENA_DIAS = 120;
 const EXPIRACION_CODIGO_HORAS = 1;
 const MAX_INTENTOS_FALLIDOS = 3;
+const EMAIL_TIMEOUT_MS = Number(process.env.EMAIL_TIMEOUT_MS) || 12000;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -25,6 +26,19 @@ function sha256(texto) {
 function generarToken() {
   const raw = crypto.randomBytes(32).toString('hex');
   return { raw, hash: sha256(raw) };
+}
+
+async function withTimeout(promise, ms, timeoutMessage = 'Operación excedió el tiempo límite') {
+  let timeoutId;
+  const timeoutPromise = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(timeoutMessage)), ms);
+  });
+
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 function validarPoliticaContrasena(contrasena) {
@@ -234,7 +248,11 @@ async function enviarCodigoRegistro(req, res) {
       `);
 
     try {
-      await enviarCodigoVerificacion(correo, codigo);
+      await withTimeout(
+        enviarCodigoVerificacion(correo, codigo),
+        EMAIL_TIMEOUT_MS,
+        `Timeout enviando correo (${EMAIL_TIMEOUT_MS}ms)`,
+      );
     } catch (emailError) {
       console.error('[auth.enviarCodigoRegistro] ERROR DE EMAIL:', emailError.message);
       console.error('[auth.enviarCodigoRegistro] EMAIL CODE:', emailError.code || 'SIN_CODIGO');
@@ -537,7 +555,11 @@ async function enviarCodigoRecuperacion(req, res) {
           VALUES (@correo, @hash, 'RECUPERACION', @expira)
         `);
 
-      await emailEnviarCodigoRecuperacion(correo, codigo);
+      await withTimeout(
+        emailEnviarCodigoRecuperacion(correo, codigo),
+        EMAIL_TIMEOUT_MS,
+        `Timeout enviando correo (${EMAIL_TIMEOUT_MS}ms)`,
+      );
     }
 
     // Respuesta idéntica independientemente de si el correo existe o no
