@@ -26,12 +26,6 @@ router.post('/recuperar-contrasena/vencida',             ctrl.cambiarContrasenaV
 router.post('/recuperar-usuario/pregunta',           ctrl.obtenerPreguntaRecuperacionUsuario);
 router.post('/recuperar-usuario/verificar-respuesta',ctrl.verificarRespuestaRecuperacionUsuario);
 
-// Verificación en dos pasos (TOTP / Google Authenticator)
-router.post('/2fa/setup',        ctrl.setup2FA);
-router.post('/2fa/enable',       ctrl.enable2FA);
-router.post('/2fa/disable',      ctrl.disable2FA);
-router.post('/2fa/verify-login', ctrl.verifyLogin2FA);
-
 // Ruta de registro simple (compatibilidad con clientes legacy — ahora redirige al flujo multi-paso)
 // Puede quitarse cuando todos los clientes usen el nuevo flujo.
 router.post('/registro', (req, res) => {

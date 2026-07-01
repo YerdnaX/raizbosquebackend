@@ -2,8 +2,9 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 
-const healthRoutes = require('./routes/health.routes');
-const authRoutes = require('./routes/auth.routes');
+const healthRoutes    = require('./routes/health.routes');
+const authRoutes      = require('./routes/auth.routes');
+const twoFactorRoutes = require('./routes/twoFactor.routes');
 const productosRoutes = require('./routes/productos.routes');
 const usuariosRoutes = require('./routes/usuarios.routes');
 const carritoRoutes = require('./routes/carrito.routes');
@@ -22,7 +23,8 @@ app.get('/', (req, res) => {
 });
 
 app.use('/api/health', healthRoutes);
-app.use('/api/auth', authRoutes);
+app.use('/api/auth',  authRoutes);
+app.use('/api/auth',  twoFactorRoutes);
 app.use('/api/productos', productosRoutes);
 app.use('/api/usuarios', usuariosRoutes);
 app.use('/api/carrito', carritoRoutes);
