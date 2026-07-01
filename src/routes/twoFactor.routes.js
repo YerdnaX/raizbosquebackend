@@ -3,13 +3,13 @@ const router  = express.Router();
 const ctrl    = require('../controllers/twoFactor.controller');
 
 // Estado del 2FA del usuario
-router.get('/status', ctrl.getStatus);
+router.get('/2fa/status', ctrl.getStatus);
 
 // Configuración y verificación (app principal)
-router.post('/setup',        ctrl.setup);
-router.post('/verify-setup', ctrl.verifySetup);
-router.post('/verify-login', ctrl.verifyLogin);
-router.post('/disable',      ctrl.disable);
+router.post('/2fa/setup',        ctrl.setup);
+router.post('/2fa/verify-setup', ctrl.verifySetup);
+router.post('/2fa/verify-login', ctrl.verifyLogin);
+router.post('/2fa/disable',      ctrl.disable);
 
 // Endpoints exclusivos para raizbosqueotp
 router.post('/otp-app/login',        ctrl.otpAppLogin);
