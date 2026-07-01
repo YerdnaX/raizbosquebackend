@@ -1,5 +1,7 @@
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
+const speakeasy = require('speakeasy');
+const QRCode = require('qrcode');
 const { getConnection, sql } = require('../config/db');
 const {
   enviarCodigoVerificacion,
@@ -115,7 +117,7 @@ async function login(req, res) {
         SELECT IdUsuario, Nombre, Apellidos, Correo, NombreUsuario, Telefono, Direccion,
                Estado, ContrasenaHash, Contrasena,
                FechaExpiracionContrasena, IntentosFallidos, CuentaBloqueada,
-               IdRol
+               IdRol, Totp2FAActivo
         FROM Usuarios
         WHERE (Correo = @id OR LOWER(NombreUsuario) = LOWER(@id))
           AND Estado = 1
@@ -181,6 +183,11 @@ async function login(req, res) {
       return res.status(403).json({ codigo: 'PASSWORD_EXPIRED', error: 'Tu contraseña ha vencido. Debes crear una nueva.', correo: u.Correo });
     }
 
+    // Si el usuario tiene 2FA activo, no entregar sesión aún
+    if (u.Totp2FAActivo) {
+      return res.json({ requires2FA: true, userId: u.IdUsuario, message: 'Código 2FA requerido' });
+    }
+
     // Obtener rol
     const rolRes = await pool.request()
       .input('idRol', sql.Int, u.IdRol)
@@ -202,6 +209,7 @@ async function login(req, res) {
         Estado: u.Estado,
         IdRol: u.IdRol,
         NombreRol: nombreRol,
+        TieneTotp2FA: false,
       },
     });
   } catch (error) {
@@ -1009,6 +1017,212 @@ async function verificarRespuestaRecuperacionUsuario(req, res) {
   }
 }
 
+// ─── POST /api/auth/2fa/setup ─────────────────────────────────────────────────
+
+async function setup2FA(req, res) {
+  const { idUsuario } = req.body;
+  if (!idUsuario) {
+    return res.status(400).json({ codigo: 'CAMPO_REQUERIDO', error: 'idUsuario requerido' });
+  }
+
+  try {
+    const pool = await getConnection();
+
+    const user = await pool.request()
+      .input('id', sql.Int, idUsuario)
+      .query('SELECT IdUsuario, Correo, NombreUsuario FROM Usuarios WHERE IdUsuario = @id AND Estado = 1');
+
+    if (user.recordset.length === 0) {
+      return res.status(404).json({ codigo: 'USER_NOT_FOUND', error: 'Usuario no encontrado' });
+    }
+
+    const u = user.recordset[0];
+    const label = encodeURIComponent(`Raíces Bosque (${u.NombreUsuario || u.Correo})`);
+
+    const secret = speakeasy.generateSecret({ length: 20 });
+    const otpauthUrl = `otpauth://totp/${label}?secret=${secret.base32}&issuer=Ra%C3%ADces%20Bosque`;
+
+    await pool.request()
+      .input('id',     sql.Int,          idUsuario)
+      .input('secret', sql.NVarChar(255), secret.base32)
+      .query('UPDATE Usuarios SET TotpSecret = @secret, Totp2FAActivo = 0 WHERE IdUsuario = @id');
+
+    const qrImage = await QRCode.toDataURL(otpauthUrl);
+
+    res.json({ success: true, qrImage });
+  } catch (error) {
+    console.error('[auth.setup2FA]', error.message);
+    res.status(500).json({ codigo: 'SERVER_ERROR', error: 'Error al configurar 2FA' });
+  }
+}
+
+// ─── POST /api/auth/2fa/enable ────────────────────────────────────────────────
+
+async function enable2FA(req, res) {
+  const { idUsuario, code } = req.body;
+  if (!idUsuario || !code) {
+    return res.status(400).json({ codigo: 'CAMPOS_REQUERIDOS', error: 'idUsuario y code son requeridos' });
+  }
+
+  try {
+    const pool = await getConnection();
+
+    const user = await pool.request()
+      .input('id', sql.Int, idUsuario)
+      .query('SELECT TotpSecret FROM Usuarios WHERE IdUsuario = @id AND Estado = 1');
+
+    if (user.recordset.length === 0) {
+      return res.status(404).json({ codigo: 'USER_NOT_FOUND', error: 'Usuario no encontrado' });
+    }
+
+    const { TotpSecret } = user.recordset[0];
+
+    if (!TotpSecret) {
+      return res.status(400).json({ codigo: '2FA_NOT_SETUP', error: 'Primero inicia la configuración de 2FA' });
+    }
+
+    const valido = speakeasy.totp.verify({
+      secret:   TotpSecret,
+      encoding: 'base32',
+      token:    String(code),
+      window:   1,
+    });
+
+    if (!valido) {
+      return res.status(401).json({ codigo: 'INVALID_2FA_CODE', error: 'Código inválido. Inténtalo nuevamente.' });
+    }
+
+    await pool.request()
+      .input('id', sql.Int, idUsuario)
+      .query('UPDATE Usuarios SET Totp2FAActivo = 1 WHERE IdUsuario = @id');
+
+    res.json({ success: true, mensaje: 'Verificación en dos pasos activada correctamente' });
+  } catch (error) {
+    console.error('[auth.enable2FA]', error.message);
+    res.status(500).json({ codigo: 'SERVER_ERROR', error: 'Error al activar 2FA' });
+  }
+}
+
+// ─── POST /api/auth/2fa/disable ───────────────────────────────────────────────
+
+async function disable2FA(req, res) {
+  const { idUsuario, code } = req.body;
+  if (!idUsuario || !code) {
+    return res.status(400).json({ codigo: 'CAMPOS_REQUERIDOS', error: 'idUsuario y code son requeridos' });
+  }
+
+  try {
+    const pool = await getConnection();
+
+    const user = await pool.request()
+      .input('id', sql.Int, idUsuario)
+      .query('SELECT TotpSecret, Totp2FAActivo FROM Usuarios WHERE IdUsuario = @id AND Estado = 1');
+
+    if (user.recordset.length === 0) {
+      return res.status(404).json({ codigo: 'USER_NOT_FOUND', error: 'Usuario no encontrado' });
+    }
+
+    const { TotpSecret, Totp2FAActivo } = user.recordset[0];
+
+    if (!TotpSecret || !Totp2FAActivo) {
+      return res.status(400).json({ codigo: '2FA_NOT_ACTIVE', error: '2FA no está activo' });
+    }
+
+    const valido = speakeasy.totp.verify({
+      secret:   TotpSecret,
+      encoding: 'base32',
+      token:    String(code),
+      window:   1,
+    });
+
+    if (!valido) {
+      return res.status(401).json({ codigo: 'INVALID_2FA_CODE', error: 'Código inválido. Inténtalo nuevamente.' });
+    }
+
+    await pool.request()
+      .input('id', sql.Int, idUsuario)
+      .query('UPDATE Usuarios SET TotpSecret = NULL, Totp2FAActivo = 0 WHERE IdUsuario = @id');
+
+    res.json({ success: true, mensaje: 'Verificación en dos pasos desactivada correctamente' });
+  } catch (error) {
+    console.error('[auth.disable2FA]', error.message);
+    res.status(500).json({ codigo: 'SERVER_ERROR', error: 'Error al desactivar 2FA' });
+  }
+}
+
+// ─── POST /api/auth/2fa/verify-login ─────────────────────────────────────────
+
+async function verifyLogin2FA(req, res) {
+  const { userId, code } = req.body;
+  const ip        = extraerIP(req);
+  const userAgent = req.headers['user-agent'] || null;
+
+  if (!userId || !code) {
+    return res.status(400).json({ codigo: 'CAMPOS_REQUERIDOS', error: 'userId y code son requeridos' });
+  }
+
+  try {
+    const pool = await getConnection();
+
+    const user = await pool.request()
+      .input('id', sql.Int, userId)
+      .query(`
+        SELECT IdUsuario, Nombre, Apellidos, Correo, NombreUsuario, Telefono, Direccion,
+               Estado, TotpSecret, Totp2FAActivo, IdRol
+        FROM Usuarios
+        WHERE IdUsuario = @id AND Estado = 1
+      `);
+
+    if (user.recordset.length === 0) {
+      return res.status(404).json({ codigo: 'USER_NOT_FOUND', error: 'Usuario no encontrado' });
+    }
+
+    const u = user.recordset[0];
+
+    if (!u.TotpSecret || !u.Totp2FAActivo) {
+      return res.status(400).json({ codigo: '2FA_NOT_ACTIVE', error: '2FA no está activo para este usuario' });
+    }
+
+    const valido = speakeasy.totp.verify({
+      secret:   u.TotpSecret,
+      encoding: 'base32',
+      token:    String(code),
+      window:   1,
+    });
+
+    if (!valido) {
+      return res.status(401).json({ codigo: 'INVALID_2FA_CODE', error: 'Código inválido. Inténtalo nuevamente.' });
+    }
+
+    const rolRes = await pool.request()
+      .input('idRol', sql.Int, u.IdRol)
+      .query('SELECT NombreRol FROM Roles WHERE IdRol = @idRol');
+    const nombreRol = rolRes.recordset[0]?.NombreRol || '';
+
+    await registrarLoginAuditoria(pool, { idUsuario: u.IdUsuario, correoIngresado: u.Correo, resultado: 'EXITOSO', motivo: '2FA verificado', ip, userAgent });
+
+    res.json({
+      success: true,
+      usuario: {
+        IdUsuario:    u.IdUsuario,
+        Nombre:       u.Nombre,
+        Apellidos:    u.Apellidos,
+        Correo:       u.Correo,
+        NombreUsuario:u.NombreUsuario,
+        Telefono:     u.Telefono,
+        Direccion:    u.Direccion,
+        Estado:       u.Estado,
+        IdRol:        u.IdRol,
+        NombreRol:    nombreRol,
+        TieneTotp2FA: true,
+      },
+    });
+  } catch (error) {
+    console.error('[auth.verifyLogin2FA]', error.message);
+    res.status(500).json({ codigo: 'SERVER_ERROR', error: 'Error al verificar el código 2FA' });
+  }
+}
+
 module.exports = {
   login,
   enviarCodigoRegistro,
@@ -1024,4 +1238,8 @@ module.exports = {
   cambiarContrasenaVencida,
   obtenerPreguntaRecuperacionUsuario,
   verificarRespuestaRecuperacionUsuario,
+  setup2FA,
+  enable2FA,
+  disable2FA,
+  verifyLogin2FA,
 };
