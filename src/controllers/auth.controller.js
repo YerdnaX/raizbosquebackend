@@ -11,7 +11,7 @@ const BCRYPT_ROUNDS = 10;
 const EXPIRACION_CONTRASENA_DIAS = 120;
 const EXPIRACION_CODIGO_HORAS = 1;
 const MAX_INTENTOS_FALLIDOS = 3;
-const EMAIL_TIMEOUT_MS = Number(process.env.EMAIL_TIMEOUT_MS) || 12000;
+const EMAIL_TIMEOUT_MS = Number(process.env.EMAIL_TIMEOUT_MS) || 25000;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 

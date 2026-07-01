@@ -1,102 +1,87 @@
-const nodemailer = require('nodemailer');
-const dns = require('dns');
+const EMAIL_TIMEOUT_MS = Number(process.env.EMAIL_TIMEOUT_MS) || 25000;
 
-const EMAIL_FORCE_IPV4 = process.env.EMAIL_FORCE_IPV4 !== 'false';
-const EMAIL_DNS_RESULT_ORDER = process.env.EMAIL_DNS_RESULT_ORDER || 'ipv4first';
-const EMAIL_PROVIDER = (process.env.EMAIL_PROVIDER || 'auto').toLowerCase();
+// ─── OAuth2 / Gmail API ───────────────────────────────────────────────────────
 
-if (typeof dns.setDefaultResultOrder === 'function') {
+async function fetchConTimeout(url, opciones) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), EMAIL_TIMEOUT_MS);
   try {
-    dns.setDefaultResultOrder(EMAIL_DNS_RESULT_ORDER);
-  } catch (_) {
-    // If unsupported by runtime, fallback to transport-level lookup.
+    return await fetch(url, { ...opciones, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
   }
 }
 
-function lookupIpv4First(hostname, options, callback) {
-  const opts = typeof options === 'function' ? {} : (options || {});
-  const cb = typeof options === 'function' ? options : callback;
-  return dns.lookup(hostname, { ...opts, family: 4, all: false }, cb);
-}
-
-function crearTransportador() {
-  const cfg = {
-    host: process.env.EMAIL_HOST,
-    port: Number(process.env.EMAIL_PORT) || 587,
-    secure: process.env.EMAIL_SECURE === 'true',
-    requireTLS: process.env.EMAIL_SECURE !== 'true',
-    auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS,
-    },
-    // Render and some SMTP providers can be slower during cold starts.
-    connectionTimeout: 30000,
-    greetingTimeout: 30000,
-    socketTimeout: 30000,
-    dnsTimeout: 30000,
-    // Important in some cloud providers where outbound IPv6 is unavailable.
-    family: EMAIL_FORCE_IPV4 ? 4 : undefined,
-    lookup: EMAIL_FORCE_IPV4 ? lookupIpv4First : undefined,
-    tls: {
-      minVersion: 'TLSv1.2',
-    },
-  };
-
-  return nodemailer.createTransport(cfg);
-}
-
-function remitente() {
-  return process.env.EMAIL_FROM || process.env.EMAIL_USER;
-}
-
-function proveedorCorreo() {
-  if (EMAIL_PROVIDER === 'smtp' || EMAIL_PROVIDER === 'resend') return EMAIL_PROVIDER;
-  return process.env.RESEND_API_KEY ? 'resend' : 'smtp';
-}
-
-async function enviarPorResend({ to, subject, text, html }) {
-  const apiKey = process.env.RESEND_API_KEY;
-  if (!apiKey) {
-    throw new Error('RESEND_API_KEY no configurado');
-  }
-
-  const response = await fetch('https://api.resend.com/emails', {
+async function obtenerAccessToken() {
+  const res = await fetchConTimeout('https://oauth2.googleapis.com/token', {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      from: remitente(),
-      to,
-      subject,
-      text,
-      html,
-    }),
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      client_id:     process.env.GMAIL_CLIENT_ID,
+      client_secret: process.env.GMAIL_CLIENT_SECRET,
+      refresh_token: process.env.GMAIL_REFRESH_TOKEN,
+      grant_type:    'refresh_token',
+    }).toString(),
   });
 
-  if (!response.ok) {
-    const detalle = await response.text();
-    throw new Error(`Resend HTTP ${response.status}: ${detalle}`);
-  }
+  const data = await res.json();
+  if (!res.ok) throw new Error(`Gmail token error: ${JSON.stringify(data)}`);
+  return data.access_token;
 }
 
-async function enviarPorSmtp({ to, subject, text, html }) {
-  const t = crearTransportador();
-  await t.sendMail({
-    from: remitente(),
-    to,
-    subject,
+function construirMensajeRFC2822({ to, subject, text, html }) {
+  const from   = process.env.GMAIL_USER;
+  const boundary = `rb_${Date.now()}`;
+
+  // RFC 2047 — codifica encabezados con caracteres no ASCII
+  const enc = (str) => `=?UTF-8?B?${Buffer.from(str).toString('base64')}?=`;
+
+  const lineas = [
+    `From: ${enc('Raíces Café & Vivero')} <${from}>`,
+    `To: ${to}`,
+    `Subject: ${enc(subject)}`,
+    'MIME-Version: 1.0',
+    `Content-Type: multipart/alternative; boundary="${boundary}"`,
+    '',
+    `--${boundary}`,
+    'Content-Type: text/plain; charset=UTF-8',
+    '',
     text,
+    '',
+    `--${boundary}`,
+    'Content-Type: text/html; charset=UTF-8',
+    '',
     html,
-  });
+    '',
+    `--${boundary}--`,
+  ];
+
+  return Buffer.from(lineas.join('\r\n')).toString('base64url');
 }
 
 async function enviarCorreo(payload) {
-  const provider = proveedorCorreo();
-  if (provider === 'resend') return enviarPorResend(payload);
-  return enviarPorSmtp(payload);
+  const accessToken = await obtenerAccessToken();
+  const raw = construirMensajeRFC2822(payload);
+
+  const res = await fetchConTimeout(
+    'https://gmail.googleapis.com/gmail/v1/users/me/messages/send',
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ raw }),
+    },
+  );
+
+  if (!res.ok) {
+    const detalle = await res.text();
+    throw new Error(`Gmail API ${res.status}: ${detalle}`);
+  }
 }
+
+// ─── Funciones públicas ───────────────────────────────────────────────────────
 
 async function enviarCodigoVerificacion(correo, codigo) {
   await enviarCorreo({
