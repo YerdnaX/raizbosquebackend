@@ -44,6 +44,72 @@ DB_DATABASE=tiusr15pl_RaicesCafeVivero
 DB_PORT=1433
 ```
 
+Para el envio de correos de registro, recuperacion y usuario, este backend usa Gmail API con OAuth2 en lugar de SMTP. Debe agregar tambien:
+
+```
+GMAIL_CLIENT_ID=xxxxxxxxxxxx.apps.googleusercontent.com
+GMAIL_CLIENT_SECRET=GOCSPX-xxxxxxxxxxxxxxxxxxxxxxxx
+GMAIL_REFRESH_TOKEN=1//xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+GMAIL_USER=tu_correo@gmail.com
+EMAIL_TIMEOUT_MS=25000
+```
+
+Importante:
+
+- El archivo [raizbosquebackend/src/services/emailService.js](raizbosquebackend/src/services/emailService.js) no usa `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_USER` ni `EMAIL_PASS`.
+- Si solo configura SMTP en `.env`, las funciones de correo seguiran fallando.
+
+---
+
+## Error de Gmail OAuth2: invalid_grant
+
+Si aparece este error:
+
+```text
+ERROR [apiClient] Status: 500 {"codigo":"EMAIL_ERROR","detalle":"Gmail token error: {\"error\":\"invalid_grant\",\"error_description\":\"Token has been expired or revoked.\"}"}
+```
+
+la causa real es que Google rechazo el `GMAIL_REFRESH_TOKEN` que el backend usa para pedir un `access_token` nuevo.
+
+### Donde ocurre en este proyecto
+
+- [raizbosquebackend/src/services/emailService.js](raizbosquebackend/src/services/emailService.js) solicita un token a `https://oauth2.googleapis.com/token`.
+- Si Google responde error, el backend lanza `Gmail token error`.
+- [raizbosquebackend/src/controllers/auth.controller.js](raizbosquebackend/src/controllers/auth.controller.js#L277) convierte eso en `EMAIL_ERROR` con HTTP 500.
+
+### Como corregirlo
+
+1. Verifique que la cuenta Gmail usada para enviar correos sea la misma que esta en `GMAIL_USER`.
+2. Entre a Google Cloud Console con esa cuenta o con la cuenta propietaria del proyecto.
+3. Abra el proyecto donde creo el OAuth Client ID.
+4. Confirme que la API `Gmail API` este habilitada.
+5. Revise la pantalla de consentimiento OAuth y asegurese de que el usuario Gmail este autorizado para usar la app si el proyecto esta en modo Testing.
+6. Genere un refresh token nuevo para ese mismo `GMAIL_CLIENT_ID` y `GMAIL_CLIENT_SECRET`.
+7. Actualice `GMAIL_REFRESH_TOKEN` en su entorno local o en Render.
+8. Reinicie el backend despues de cambiar variables de entorno.
+9. Pruebe otra vez el flujo que envia correo.
+
+### Casos tipicos que producen `invalid_grant`
+
+- El usuario revoco el acceso de la app desde su cuenta Google.
+- Se regenero el OAuth Client y el refresh token viejo quedo invalido.
+- El refresh token pertenece a otro `client_id` o a otra cuenta Gmail.
+- La app OAuth sigue en modo Testing y el usuario no esta dentro de los test users.
+- El refresh token se genero sin el alcance correcto de Gmail.
+
+### Verificacion rapida que debe hacer en este repo
+
+Compare estas dos cosas:
+
+- [raizbosquebackend/src/services/emailService.js](raizbosquebackend/src/services/emailService.js) espera `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN` y `GMAIL_USER`.
+- Si su archivo `.env` o variables de Render solo tienen `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_USER` y `EMAIL_PASS`, la configuracion no corresponde al codigo actual.
+
+### Recomendacion operativa
+
+- Mantenga una sola estrategia de envio de correo por ambiente.
+- Si seguira usando Gmail API, quite la dependencia operativa de SMTP en sus variables reales para evitar confusion.
+- Si prefiere SMTP, entonces hay que reescribir [raizbosquebackend/src/services/emailService.js](raizbosquebackend/src/services/emailService.js) para usar SMTP de forma explicita.
+
 ---
 
 ## Comandos
