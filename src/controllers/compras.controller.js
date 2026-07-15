@@ -1,10 +1,51 @@
 const { getConnection, sql } = require('../config/db');
+const { validarCadenaUbicacion, construirDireccionEntrega } = require('../services/ubicacionesService');
+
+// Determina la dirección final a guardar (string). Si el cliente envía una
+// ubicación armada con los dropdowns en cascada, los nombres se toman de la
+// base de datos (nunca del texto libre del cliente) y se valida la jerarquía
+// completa. Si en cambio envía una dirección guardada (flujo existente), se
+// usa tal cual para mantener compatibilidad con direcciones ya guardadas.
+async function resolverDireccionEntrega({ direccionEntrega, ubicacion }) {
+  if (ubicacion) {
+    const { idsSeleccionados, direccionExacta } = ubicacion;
+
+    if (!Array.isArray(idsSeleccionados) || idsSeleccionados.length === 0) {
+      return { error: 'Debe completar la ubicación de entrega' };
+    }
+    if (!direccionExacta || !direccionExacta.trim()) {
+      return { error: 'Debe indicar la dirección exacta' };
+    }
+
+    const validacion = await validarCadenaUbicacion(idsSeleccionados);
+    if (!validacion.valido) {
+      return { error: validacion.motivo };
+    }
+
+    return { direccion: construirDireccionEntrega(validacion.nombres, direccionExacta.trim()) };
+  }
+
+  if (direccionEntrega && direccionEntrega.trim()) {
+    return { direccion: direccionEntrega.trim() };
+  }
+
+  return { error: 'Debe indicar una dirección de entrega' };
+}
 
 async function realizarCompra(req, res) {
-  const { idUsuario, metodoEntrega, direccionEntrega } = req.body;
+  const { idUsuario, metodoEntrega, direccionEntrega, ubicacion } = req.body;
 
   if (!idUsuario || !metodoEntrega) {
     return res.status(400).json({ success: false, message: 'Faltan datos requeridos' });
+  }
+
+  let direccionFinal = null;
+  if (metodoEntrega === 'Domicilio') {
+    const resultado = await resolverDireccionEntrega({ direccionEntrega, ubicacion });
+    if (resultado.error) {
+      return res.status(400).json({ success: false, message: resultado.error });
+    }
+    direccionFinal = resultado.direccion;
   }
 
   try {
@@ -38,7 +79,7 @@ async function realizarCompra(req, res) {
       .input('impuesto', sql.Decimal(10, 2), impuesto)
       .input('total', sql.Decimal(10, 2), total)
       .input('metodoEntrega', sql.VarChar(50), metodoEntrega)
-      .input('direccionEntrega', sql.VarChar(300), direccionEntrega || null)
+      .input('direccionEntrega', sql.VarChar(300), direccionFinal)
       .query(`
         INSERT INTO Compras (IdUsuario, Subtotal, Impuesto, Total, MetodoEntrega, DireccionEntrega)
         OUTPUT INSERTED.IdCompra
