@@ -1,11 +1,61 @@
 const { getConnection, sql } = require('../config/db');
 
+const PROVEDOR_VIVERO_API_URL = process.env.PROVEDOR_VIVERO_API_URL || 'http://localhost:8001';
+const PROVEDOR_VIVERO_TIMEOUT_MS = 5000;
+
+async function consultarProvedorVivero(idProductoProvedor) {
+  if (!idProductoProvedor) {
+    return null;
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), PROVEDOR_VIVERO_TIMEOUT_MS);
+
+  try {
+    const respuesta = await fetch(
+      `${PROVEDOR_VIVERO_API_URL}/api/disponibilidad/${idProductoProvedor}`,
+      { signal: controller.signal }
+    );
+
+    if (respuesta.status === 404) {
+      return null;
+    }
+
+    if (!respuesta.ok) {
+      console.error('Error consultando provedor vivero:', respuesta.status);
+      return null;
+    }
+
+    const productoProvedor = await respuesta.json();
+
+    return {
+      cantidadDisponible: productoProvedor.cantidadDisponible,
+      tiempoReposicionDias: productoProvedor.tiempoReposicionDias,
+      estado: productoProvedor.estado
+    };
+  } catch (error) {
+    console.error('No se pudo consultar el provedor vivero:', error.message);
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function agregarProvedorAProductos(productos) {
+  return Promise.all(
+    productos.map(async (producto) => ({
+      ...producto,
+      Provedor: await consultarProvedorVivero(producto.IdProductoProvedorVivero)
+    }))
+  );
+}
+
 async function getProductosVivero(req, res) {
   try {
     const pool = await getConnection();
     const result = await pool.request().query(`
       SELECT
-        p.IdProducto, p.Nombre, p.Descripcion, p.Precio, p.Imagen, p.Stock,
+        p.IdProducto, p.IdProductoProvedorVivero, p.Nombre, p.Descripcion, p.Precio, p.Imagen, p.Stock,
         c.NombreCategoria,
         pl.FrecuenciaRiego, pl.NivelLuz, pl.TamanoAproximado, pl.NivelDificultad,
         pl.TipoClima, pl.CuidadosEspeciales, pl.TemperaturaRecomendada, pl.TipoSuelo
@@ -15,7 +65,8 @@ async function getProductosVivero(req, res) {
       WHERE c.Tipo = 'Vivero' AND p.Disponible >= 1
       ORDER BY p.IdProducto
     `);
-    res.json({ success: true, productos: result.recordset });
+    const productos = await agregarProvedorAProductos(result.recordset);
+    res.json({ success: true, productos });
   } catch (error) {
     res.status(500).json({ error: 'Error al obtener productos del vivero' });
   }
@@ -67,14 +118,15 @@ async function getProductosViveroProductos(req, res) {
     const pool = await getConnection();
     const result = await pool.request().query(`
       SELECT
-        p.IdProducto, p.Nombre, p.Descripcion, p.Precio, p.Imagen, p.Stock,
+        p.IdProducto, p.IdProductoProvedorVivero, p.Nombre, p.Descripcion, p.Precio, p.Imagen, p.Stock,
         c.NombreCategoria
       FROM Productos p
       INNER JOIN Categorias c ON p.IdCategoria = c.IdCategoria
       WHERE p.TipoProducto = 'ProductoVivero' AND p.Disponible >= 1
       ORDER BY c.NombreCategoria, p.Nombre
     `);
-    res.json({ success: true, productos: result.recordset });
+    const productos = await agregarProvedorAProductos(result.recordset);
+    res.json({ success: true, productos });
   } catch (error) {
     res.status(500).json({ error: 'Error al obtener los productos del vivero' });
   }
@@ -110,8 +162,8 @@ async function getProductoPorId(req, res) {
       .input('id', sql.Int, id)
       .query(`
         SELECT
-          p.IdProducto, p.Nombre, p.Descripcion, p.Precio, p.Imagen, p.Stock,
-          c.NombreCategoria,
+          p.IdProducto, p.IdProductoProvedorVivero, p.Nombre, p.Descripcion, p.Precio, p.Imagen, p.Stock,
+          c.NombreCategoria, c.Tipo AS TipoCategoria,
           pl.FrecuenciaRiego, pl.NivelLuz, pl.TamanoAproximado, pl.NivelDificultad,
           pl.TipoClima, pl.CuidadosEspeciales, pl.TemperaturaRecomendada, pl.TipoSuelo
         FROM Productos p
@@ -122,7 +174,12 @@ async function getProductoPorId(req, res) {
     if (result.recordset.length === 0) {
       return res.status(404).json({ error: 'Producto no encontrado' });
     }
-    res.json({ success: true, producto: result.recordset[0] });
+    const producto = result.recordset[0];
+    if (producto.TipoCategoria === 'Vivero') {
+      producto.Provedor = await consultarProvedorVivero(producto.IdProductoProvedorVivero);
+    }
+    delete producto.TipoCategoria;
+    res.json({ success: true, producto });
   } catch (error) {
     res.status(500).json({ error: 'Error al obtener el producto' });
   }
