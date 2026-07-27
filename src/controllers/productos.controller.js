@@ -1,19 +1,20 @@
 const { getConnection, sql } = require('../config/db');
 
 const PROVEDOR_VIVERO_API_URL = process.env.PROVEDOR_VIVERO_API_URL || 'http://localhost:8001';
-const PROVEDOR_VIVERO_TIMEOUT_MS = 5000;
+const PROVEDOR_PRODUCTOS_API_URL = process.env.PROVEDOR_PRODUCTOS_API_URL || 'http://localhost:8002';
+const PROVEDOR_TIMEOUT_MS = 5000;
 
-async function consultarProvedorVivero(idProductoProvedor) {
+async function consultarProvedor(nombreProvedor, apiUrl, idProductoProvedor) {
   if (!idProductoProvedor) {
     return null;
   }
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), PROVEDOR_VIVERO_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort(), PROVEDOR_TIMEOUT_MS);
 
   try {
     const respuesta = await fetch(
-      `${PROVEDOR_VIVERO_API_URL}/api/disponibilidad/${idProductoProvedor}`,
+      `${apiUrl}/api/disponibilidad/${idProductoProvedor}`,
       { signal: controller.signal }
     );
 
@@ -22,7 +23,7 @@ async function consultarProvedorVivero(idProductoProvedor) {
     }
 
     if (!respuesta.ok) {
-      console.error('Error consultando provedor vivero:', respuesta.status);
+      console.error(`Error consultando ${nombreProvedor}:`, respuesta.status);
       return null;
     }
 
@@ -34,18 +35,48 @@ async function consultarProvedorVivero(idProductoProvedor) {
       estado: productoProvedor.estado
     };
   } catch (error) {
-    console.error('No se pudo consultar el provedor vivero:', error.message);
+    console.error(`No se pudo consultar ${nombreProvedor}:`, error.message);
     return null;
   } finally {
     clearTimeout(timeout);
   }
 }
 
+function obtenerConfigProvedor(producto) {
+  if (producto.TipoProducto === 'Planta') {
+    return {
+      nombre: 'provedor vivero',
+      apiUrl: PROVEDOR_VIVERO_API_URL,
+      idProductoProvedor: producto.IdProductoProvedorVivero
+    };
+  }
+
+  if (producto.TipoProducto === 'ProductoVivero') {
+    return {
+      nombre: 'provedor productos',
+      apiUrl: PROVEDOR_PRODUCTOS_API_URL,
+      idProductoProvedor: producto.IdProductoProvedorProductos
+    };
+  }
+
+  return null;
+}
+
+async function consultarProvedorProducto(producto) {
+  const config = obtenerConfigProvedor(producto);
+
+  if (!config) {
+    return null;
+  }
+
+  return consultarProvedor(config.nombre, config.apiUrl, config.idProductoProvedor);
+}
+
 async function agregarProvedorAProductos(productos) {
   return Promise.all(
     productos.map(async (producto) => ({
       ...producto,
-      Provedor: await consultarProvedorVivero(producto.IdProductoProvedorVivero)
+      Provedor: await consultarProvedorProducto(producto)
     }))
   );
 }
@@ -55,7 +86,8 @@ async function getProductosVivero(req, res) {
     const pool = await getConnection();
     const result = await pool.request().query(`
       SELECT
-        p.IdProducto, p.IdProductoProvedorVivero, p.Nombre, p.Descripcion, p.Precio, p.Imagen, p.Stock,
+        p.IdProducto, p.IdProductoProvedorVivero, p.IdProductoProvedorProductos,
+        p.Nombre, p.Descripcion, p.Precio, p.Imagen, p.Stock, p.TipoProducto,
         c.NombreCategoria,
         pl.FrecuenciaRiego, pl.NivelLuz, pl.TamanoAproximado, pl.NivelDificultad,
         pl.TipoClima, pl.CuidadosEspeciales, pl.TemperaturaRecomendada, pl.TipoSuelo
@@ -118,7 +150,8 @@ async function getProductosViveroProductos(req, res) {
     const pool = await getConnection();
     const result = await pool.request().query(`
       SELECT
-        p.IdProducto, p.IdProductoProvedorVivero, p.Nombre, p.Descripcion, p.Precio, p.Imagen, p.Stock,
+        p.IdProducto, p.IdProductoProvedorVivero, p.IdProductoProvedorProductos,
+        p.Nombre, p.Descripcion, p.Precio, p.Imagen, p.Stock, p.TipoProducto,
         c.NombreCategoria
       FROM Productos p
       INNER JOIN Categorias c ON p.IdCategoria = c.IdCategoria
@@ -162,7 +195,8 @@ async function getProductoPorId(req, res) {
       .input('id', sql.Int, id)
       .query(`
         SELECT
-          p.IdProducto, p.IdProductoProvedorVivero, p.Nombre, p.Descripcion, p.Precio, p.Imagen, p.Stock,
+          p.IdProducto, p.IdProductoProvedorVivero, p.IdProductoProvedorProductos,
+          p.Nombre, p.Descripcion, p.Precio, p.Imagen, p.Stock, p.TipoProducto,
           c.NombreCategoria, c.Tipo AS TipoCategoria,
           pl.FrecuenciaRiego, pl.NivelLuz, pl.TamanoAproximado, pl.NivelDificultad,
           pl.TipoClima, pl.CuidadosEspeciales, pl.TemperaturaRecomendada, pl.TipoSuelo
@@ -176,7 +210,7 @@ async function getProductoPorId(req, res) {
     }
     const producto = result.recordset[0];
     if (producto.TipoCategoria === 'Vivero') {
-      producto.Provedor = await consultarProvedorVivero(producto.IdProductoProvedorVivero);
+      producto.Provedor = await consultarProvedorProducto(producto);
     }
     delete producto.TipoCategoria;
     res.json({ success: true, producto });

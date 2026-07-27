@@ -142,6 +142,7 @@ CREATE TABLE Productos (
     Imagen       VARCHAR(300),
     TipoProducto VARCHAR(50)   NOT NULL,
     IdProductoProvedorVivero INT NULL,
+    IdProductoProvedorProductos INT NULL,
     Disponible   BIT           DEFAULT 1,
     Stock        INT           DEFAULT 0,
     FechaRegistro DATETIME     DEFAULT GETDATE(),
@@ -468,10 +469,10 @@ UPDATE Productos SET IdProductoProvedorVivero = 2 WHERE Nombre = 'Sansevieria';
 UPDATE Productos SET IdProductoProvedorVivero = 3 WHERE Nombre = 'Pothos Dorado';
 UPDATE Productos SET IdProductoProvedorVivero = 4 WHERE Nombre = 'Lavanda';
 UPDATE Productos SET IdProductoProvedorVivero = 5 WHERE Nombre = 'Jazmín Estrella';
-UPDATE Productos SET IdProductoProvedorVivero = 6 WHERE Nombre = 'Maceta de barro mediana';
-UPDATE Productos SET IdProductoProvedorVivero = 7 WHERE Nombre = 'Maceta decorativa blanca';
-UPDATE Productos SET IdProductoProvedorVivero = 8 WHERE Nombre = 'Fertilizante orgánico';
-UPDATE Productos SET IdProductoProvedorVivero = 9 WHERE Nombre = 'Kit de jardinería básico';
+UPDATE Productos SET IdProductoProvedorProductos = 1 WHERE Nombre = 'Maceta de barro mediana';
+UPDATE Productos SET IdProductoProvedorProductos = 2 WHERE Nombre = 'Maceta decorativa blanca';
+UPDATE Productos SET IdProductoProvedorProductos = 3 WHERE Nombre = 'Fertilizante orgánico';
+UPDATE Productos SET IdProductoProvedorProductos = 4 WHERE Nombre = 'Kit de jardinería básico';
 GO
 
 -- Registros de plantas (idempotente por IdProducto único)
