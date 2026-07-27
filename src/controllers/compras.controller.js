@@ -3,21 +3,18 @@ const { validarCadenaUbicacion, construirDireccionEntrega } = require('../servic
 
 const PROVEDOR_ENTREGAS_API_URL = process.env.PROVEDOR_ENTREGAS_API_URL || 'http://localhost:8003';
 const PROVEDOR_ENTREGAS_TIMEOUT_MS = 5000;
+const PROVEDOR_CUPONES_API_URL = process.env.PROVEDOR_CUPONES_API_URL || 'http://localhost:8004';
+const PROVEDOR_CUPONES_TIMEOUT_MS = 5000;
 
-// Determina la dirección final a guardar (string). Si el cliente envía una
-// ubicación armada con los dropdowns en cascada, los nombres se toman de la
-// base de datos (nunca del texto libre del cliente) y se valida la jerarquía
-// completa. Si en cambio envía una dirección guardada (flujo existente), se
-// usa tal cual para mantener compatibilidad con direcciones ya guardadas.
 async function resolverDireccionEntrega({ direccionEntrega, ubicacion }) {
   if (ubicacion) {
     const { idsSeleccionados, direccionExacta } = ubicacion;
 
     if (!Array.isArray(idsSeleccionados) || idsSeleccionados.length === 0) {
-      return { error: 'Debe completar la ubicación de entrega' };
+      return { error: 'Debe completar la ubicacion de entrega' };
     }
     if (!direccionExacta || !direccionExacta.trim()) {
-      return { error: 'Debe indicar la dirección exacta' };
+      return { error: 'Debe indicar la direccion exacta' };
     }
 
     const validacion = await validarCadenaUbicacion(idsSeleccionados);
@@ -32,7 +29,7 @@ async function resolverDireccionEntrega({ direccionEntrega, ubicacion }) {
     return { direccion: direccionEntrega.trim() };
   }
 
-  return { error: 'Debe indicar una dirección de entrega' };
+  return { error: 'Debe indicar una direccion de entrega' };
 }
 
 async function registrarEntregaConProvedor({ numeroOrden, direccionEntrega }) {
@@ -67,8 +64,171 @@ async function registrarEntregaConProvedor({ numeroOrden, direccionEntrega }) {
   }
 }
 
+async function obtenerCarritoActivo(pool, idUsuario) {
+  const carritoResult = await pool.request()
+    .input('idUsuario', sql.Int, idUsuario)
+    .query(`SELECT TOP 1 IdCarrito FROM Carritos WHERE IdUsuario = @idUsuario AND Estado = 'Activo' ORDER BY IdCarrito ASC`);
+
+  if (carritoResult.recordset.length === 0) {
+    return { error: 'No hay carrito activo' };
+  }
+
+  const idCarrito = carritoResult.recordset[0].IdCarrito;
+
+  const itemsResult = await pool.request()
+    .input('idCarrito', sql.Int, idCarrito)
+    .query(`SELECT IdProducto, Cantidad, PrecioUnitario, Subtotal FROM CarritoDetalle WHERE IdCarrito = @idCarrito`);
+
+  if (itemsResult.recordset.length === 0) {
+    return { error: 'El carrito esta vacio' };
+  }
+
+  return {
+    idCarrito,
+    items: itemsResult.recordset,
+  };
+}
+
+async function validarCuponConProvedor(codigoCupon) {
+  const codigo = codigoCupon ? codigoCupon.trim().toUpperCase() : '';
+
+  if (!codigo) {
+    return { cupon: null };
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), PROVEDOR_CUPONES_TIMEOUT_MS);
+
+  try {
+    const respuesta = await fetch(`${PROVEDOR_CUPONES_API_URL}/api/cupones/validar`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ codigo }),
+      signal: controller.signal,
+    });
+
+    if (!respuesta.ok) {
+      return { error: 'No se pudo validar el cupon' };
+    }
+
+    const resultado = await respuesta.json();
+
+    if (!resultado.valido) {
+      return { error: resultado.message || 'Cupon no valido' };
+    }
+
+    return {
+      cupon: {
+        codigo: resultado.codigo,
+        descripcion: resultado.descripcion,
+        tipoDescuento: resultado.tipoDescuento,
+        valorDescuento: Number(resultado.valorDescuento),
+      },
+    };
+  } catch (error) {
+    console.error('No se pudo validar cupon con provedor:', error.message);
+    return { error: 'No se pudo validar el cupon' };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function redondearMonto(monto) {
+  return Math.round(monto * 100) / 100;
+}
+
+function calcularMontoDescuento(cupon, subtotal) {
+  if (!cupon) return 0;
+
+  if (cupon.tipoDescuento === 'PORCENTAJE') {
+    return Math.min(redondearMonto(subtotal * (cupon.valorDescuento / 100)), subtotal);
+  }
+
+  if (cupon.tipoDescuento === 'MONTO_FIJO') {
+    return Math.min(redondearMonto(cupon.valorDescuento), subtotal);
+  }
+
+  return 0;
+}
+
+async function construirResumenCompra(pool, idUsuario, codigoCupon) {
+  const carrito = await obtenerCarritoActivo(pool, idUsuario);
+  if (carrito.error) {
+    return { error: carrito.error };
+  }
+
+  const subtotal = redondearMonto(carrito.items.reduce((suma, row) => suma + parseFloat(row.Subtotal), 0));
+  const resultadoCupon = await validarCuponConProvedor(codigoCupon);
+
+  if (resultadoCupon.error) {
+    return { error: resultadoCupon.error };
+  }
+
+  const descuento = calcularMontoDescuento(resultadoCupon.cupon, subtotal);
+  const subtotalConDescuento = redondearMonto(subtotal - descuento);
+  const impuesto = redondearMonto(subtotalConDescuento * 0.13);
+  const total = redondearMonto(subtotalConDescuento + impuesto);
+
+  return {
+    idCarrito: carrito.idCarrito,
+    items: carrito.items,
+    subtotal,
+    descuento,
+    impuesto,
+    total,
+    cupon: resultadoCupon.cupon
+      ? {
+          ...resultadoCupon.cupon,
+          montoDescuento: descuento,
+        }
+      : null,
+  };
+}
+
+async function comprasTieneCamposCupon(pool) {
+  const result = await pool.request().query(`
+    SELECT
+      COL_LENGTH('Compras', 'CodigoCupon') AS CodigoCupon,
+      COL_LENGTH('Compras', 'Descuento') AS Descuento
+  `);
+
+  const row = result.recordset[0];
+  return !!(row.CodigoCupon && row.Descuento);
+}
+
+async function obtenerResumenCompra(req, res) {
+  const { idUsuario, codigoCupon } = req.body;
+
+  if (!idUsuario) {
+    return res.status(400).json({ success: false, message: 'Faltan datos requeridos' });
+  }
+
+  try {
+    const pool = await getConnection();
+    const resumen = await construirResumenCompra(pool, idUsuario, codigoCupon);
+
+    if (resumen.error) {
+      return res.status(400).json({ success: false, message: resumen.error });
+    }
+
+    res.json({
+      success: true,
+      subtotal: resumen.subtotal,
+      descuento: resumen.descuento,
+      impuesto: resumen.impuesto,
+      total: resumen.total,
+      cupon: resumen.cupon,
+    });
+  } catch (error) {
+    console.error('Error al obtener resumen de compra:', error);
+    res.status(500).json({ success: false, message: 'Error al obtener resumen de compra' });
+  }
+}
+
 async function realizarCompra(req, res) {
-  const { idUsuario, metodoEntrega, direccionEntrega, ubicacion } = req.body;
+  const { idUsuario, metodoEntrega, direccionEntrega, ubicacion, codigoCupon } = req.body;
 
   if (!idUsuario || !metodoEntrega) {
     return res.status(400).json({ success: false, message: 'Faltan datos requeridos' });
@@ -85,45 +245,42 @@ async function realizarCompra(req, res) {
 
   try {
     const pool = await getConnection();
+    const resumen = await construirResumenCompra(pool, idUsuario, codigoCupon);
 
-    const carritoResult = await pool.request()
-      .input('idUsuario', sql.Int, idUsuario)
-      .query(`SELECT TOP 1 IdCarrito FROM Carritos WHERE IdUsuario = @idUsuario AND Estado = 'Activo' ORDER BY IdCarrito ASC`);
-
-    if (carritoResult.recordset.length === 0) {
-      return res.status(400).json({ success: false, message: 'No hay carrito activo' });
+    if (resumen.error) {
+      return res.status(400).json({ success: false, message: resumen.error });
     }
 
-    const idCarrito = carritoResult.recordset[0].IdCarrito;
-
-    const itemsResult = await pool.request()
-      .input('idCarrito', sql.Int, idCarrito)
-      .query(`SELECT IdProducto, Cantidad, PrecioUnitario, Subtotal FROM CarritoDetalle WHERE IdCarrito = @idCarrito`);
-
-    if (itemsResult.recordset.length === 0) {
-      return res.status(400).json({ success: false, message: 'El carrito está vacío' });
-    }
-
-    const subtotal = itemsResult.recordset.reduce((suma, row) => suma + parseFloat(row.Subtotal), 0);
-    const impuesto = Math.round(subtotal * 0.13 * 100) / 100;
-    const total = Math.round((subtotal + impuesto) * 100) / 100;
-
-    const compraResult = await pool.request()
+    const tieneCamposCupon = await comprasTieneCamposCupon(pool);
+    const compraRequest = pool.request()
       .input('idUsuario', sql.Int, idUsuario)
-      .input('subtotal', sql.Decimal(10, 2), subtotal)
-      .input('impuesto', sql.Decimal(10, 2), impuesto)
-      .input('total', sql.Decimal(10, 2), total)
+      .input('subtotal', sql.Decimal(10, 2), resumen.subtotal)
+      .input('impuesto', sql.Decimal(10, 2), resumen.impuesto)
+      .input('total', sql.Decimal(10, 2), resumen.total)
       .input('metodoEntrega', sql.VarChar(50), metodoEntrega)
-      .input('direccionEntrega', sql.VarChar(300), direccionFinal)
-      .query(`
+      .input('direccionEntrega', sql.VarChar(300), direccionFinal);
+
+    let compraResult;
+    if (tieneCamposCupon) {
+      compraResult = await compraRequest
+        .input('codigoCupon', sql.VarChar(50), resumen.cupon ? resumen.cupon.codigo : null)
+        .input('descuento', sql.Decimal(10, 2), resumen.descuento)
+        .query(`
+          INSERT INTO Compras (IdUsuario, Subtotal, Impuesto, Total, MetodoEntrega, DireccionEntrega, CodigoCupon, Descuento)
+          OUTPUT INSERTED.IdCompra
+          VALUES (@idUsuario, @subtotal, @impuesto, @total, @metodoEntrega, @direccionEntrega, @codigoCupon, @descuento)
+        `);
+    } else {
+      compraResult = await compraRequest.query(`
         INSERT INTO Compras (IdUsuario, Subtotal, Impuesto, Total, MetodoEntrega, DireccionEntrega)
         OUTPUT INSERTED.IdCompra
         VALUES (@idUsuario, @subtotal, @impuesto, @total, @metodoEntrega, @direccionEntrega)
       `);
+    }
 
     const idCompra = compraResult.recordset[0].IdCompra;
 
-    for (const item of itemsResult.recordset) {
+    for (const item of resumen.items) {
       await pool.request()
         .input('idCompra', sql.Int, idCompra)
         .input('idProducto', sql.Int, item.IdProducto)
@@ -137,7 +294,7 @@ async function realizarCompra(req, res) {
     }
 
     await pool.request()
-      .input('idCarrito', sql.Int, idCarrito)
+      .input('idCarrito', sql.Int, resumen.idCarrito)
       .query(`UPDATE Carritos SET Estado = 'Completado' WHERE IdCarrito = @idCarrito`);
 
     let trackingNumber = null;
@@ -153,7 +310,12 @@ async function realizarCompra(req, res) {
       idCompra,
       numeroOrden: idCompra,
       trackingNumber,
-      direccionEntrega: direccionFinal
+      direccionEntrega: direccionFinal,
+      subtotal: resumen.subtotal,
+      descuento: resumen.descuento,
+      impuesto: resumen.impuesto,
+      total: resumen.total,
+      cupon: resumen.cupon,
     });
   } catch (error) {
     console.error('Error al realizar compra:', error);
@@ -214,4 +376,4 @@ async function obtenerHistorial(req, res) {
   }
 }
 
-module.exports = { realizarCompra, obtenerHistorial };
+module.exports = { realizarCompra, obtenerHistorial, obtenerResumenCompra };
