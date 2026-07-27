@@ -1,6 +1,9 @@
 const { getConnection, sql } = require('../config/db');
 const { validarCadenaUbicacion, construirDireccionEntrega } = require('../services/ubicacionesService');
 
+const PROVEDOR_ENTREGAS_API_URL = process.env.PROVEDOR_ENTREGAS_API_URL || 'http://localhost:8003';
+const PROVEDOR_ENTREGAS_TIMEOUT_MS = 5000;
+
 // Determina la dirección final a guardar (string). Si el cliente envía una
 // ubicación armada con los dropdowns en cascada, los nombres se toman de la
 // base de datos (nunca del texto libre del cliente) y se valida la jerarquía
@@ -30,6 +33,38 @@ async function resolverDireccionEntrega({ direccionEntrega, ubicacion }) {
   }
 
   return { error: 'Debe indicar una dirección de entrega' };
+}
+
+async function registrarEntregaConProvedor({ numeroOrden, direccionEntrega }) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), PROVEDOR_ENTREGAS_TIMEOUT_MS);
+
+  try {
+    const respuesta = await fetch(`${PROVEDOR_ENTREGAS_API_URL}/api/entregas`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        numeroOrden,
+        direccionEntrega,
+      }),
+      signal: controller.signal,
+    });
+
+    if (!respuesta.ok) {
+      console.error('Error registrando entrega con provedor:', respuesta.status);
+      return null;
+    }
+
+    const entrega = await respuesta.json();
+    return entrega.trackingNumber || null;
+  } catch (error) {
+    console.error('No se pudo registrar entrega con provedor:', error.message);
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 async function realizarCompra(req, res) {
@@ -105,7 +140,15 @@ async function realizarCompra(req, res) {
       .input('idCarrito', sql.Int, idCarrito)
       .query(`UPDATE Carritos SET Estado = 'Completado' WHERE IdCarrito = @idCarrito`);
 
-    res.json({ success: true, idCompra });
+    let trackingNumber = null;
+    if (metodoEntrega === 'Domicilio') {
+      trackingNumber = await registrarEntregaConProvedor({
+        numeroOrden: idCompra,
+        direccionEntrega: direccionFinal,
+      });
+    }
+
+    res.json({ success: true, idCompra, numeroOrden: idCompra, trackingNumber });
   } catch (error) {
     console.error('Error al realizar compra:', error);
     res.status(500).json({ success: false, message: 'Error al procesar la compra' });
