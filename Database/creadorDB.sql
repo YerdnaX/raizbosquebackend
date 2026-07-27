@@ -141,8 +141,7 @@ CREATE TABLE Productos (
     Precio       DECIMAL(10,2) NOT NULL,
     Imagen       VARCHAR(300),
     TipoProducto VARCHAR(50)   NOT NULL,
-    IdProductoProvedorVivero INT NULL,
-    IdProductoProvedorProductos INT NULL,
+    IdProductoProvedor INT NULL,
     Disponible   BIT           DEFAULT 1,
     Stock        INT           DEFAULT 0,
     FechaRegistro DATETIME     DEFAULT GETDATE(),
@@ -464,15 +463,15 @@ INNER JOIN Categorias c ON c.NombreCategoria = 'Herramientas'
 WHERE p.Nombre = 'Kit de jardinería básico';
 GO
 
-UPDATE Productos SET IdProductoProvedorVivero = 1 WHERE Nombre = 'Monstera Deliciosa';
-UPDATE Productos SET IdProductoProvedorVivero = 2 WHERE Nombre = 'Sansevieria';
-UPDATE Productos SET IdProductoProvedorVivero = 3 WHERE Nombre = 'Pothos Dorado';
-UPDATE Productos SET IdProductoProvedorVivero = 4 WHERE Nombre = 'Lavanda';
-UPDATE Productos SET IdProductoProvedorVivero = 5 WHERE Nombre = 'Jazmín Estrella';
-UPDATE Productos SET IdProductoProvedorProductos = 1 WHERE Nombre = 'Maceta de barro mediana';
-UPDATE Productos SET IdProductoProvedorProductos = 2 WHERE Nombre = 'Maceta decorativa blanca';
-UPDATE Productos SET IdProductoProvedorProductos = 3 WHERE Nombre = 'Fertilizante orgánico';
-UPDATE Productos SET IdProductoProvedorProductos = 4 WHERE Nombre = 'Kit de jardinería básico';
+UPDATE Productos SET IdProductoProvedor = 1 WHERE Nombre = 'Monstera Deliciosa';
+UPDATE Productos SET IdProductoProvedor = 2 WHERE Nombre = 'Sansevieria';
+UPDATE Productos SET IdProductoProvedor = 3 WHERE Nombre = 'Pothos Dorado';
+UPDATE Productos SET IdProductoProvedor = 4 WHERE Nombre = 'Lavanda';
+UPDATE Productos SET IdProductoProvedor = 5 WHERE Nombre = 'Jazmín Estrella';
+UPDATE Productos SET IdProductoProvedor = 1 WHERE Nombre = 'Maceta de barro mediana';
+UPDATE Productos SET IdProductoProvedor = 2 WHERE Nombre = 'Maceta decorativa blanca';
+UPDATE Productos SET IdProductoProvedor = 3 WHERE Nombre = 'Fertilizante orgánico';
+UPDATE Productos SET IdProductoProvedor = 4 WHERE Nombre = 'Kit de jardinería básico';
 GO
 
 -- Registros de plantas (idempotente por IdProducto único)

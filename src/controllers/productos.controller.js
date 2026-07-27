@@ -47,7 +47,7 @@ function obtenerConfigProvedor(producto) {
     return {
       nombre: 'provedor vivero',
       apiUrl: PROVEDOR_VIVERO_API_URL,
-      idProductoProvedor: producto.IdProductoProvedorVivero
+      idProductoProvedor: producto.IdProductoProvedor
     };
   }
 
@@ -55,7 +55,7 @@ function obtenerConfigProvedor(producto) {
     return {
       nombre: 'provedor productos',
       apiUrl: PROVEDOR_PRODUCTOS_API_URL,
-      idProductoProvedor: producto.IdProductoProvedorProductos
+      idProductoProvedor: producto.IdProductoProvedor
     };
   }
 
@@ -86,7 +86,7 @@ async function getProductosVivero(req, res) {
     const pool = await getConnection();
     const result = await pool.request().query(`
       SELECT
-        p.IdProducto, p.IdProductoProvedorVivero, p.IdProductoProvedorProductos,
+        p.IdProducto, p.IdProductoProvedor,
         p.Nombre, p.Descripcion, p.Precio, p.Imagen, p.Stock, p.TipoProducto,
         c.NombreCategoria,
         pl.FrecuenciaRiego, pl.NivelLuz, pl.TamanoAproximado, pl.NivelDificultad,
@@ -150,7 +150,7 @@ async function getProductosViveroProductos(req, res) {
     const pool = await getConnection();
     const result = await pool.request().query(`
       SELECT
-        p.IdProducto, p.IdProductoProvedorVivero, p.IdProductoProvedorProductos,
+        p.IdProducto, p.IdProductoProvedor,
         p.Nombre, p.Descripcion, p.Precio, p.Imagen, p.Stock, p.TipoProducto,
         c.NombreCategoria
       FROM Productos p
@@ -195,7 +195,7 @@ async function getProductoPorId(req, res) {
       .input('id', sql.Int, id)
       .query(`
         SELECT
-          p.IdProducto, p.IdProductoProvedorVivero, p.IdProductoProvedorProductos,
+          p.IdProducto, p.IdProductoProvedor,
           p.Nombre, p.Descripcion, p.Precio, p.Imagen, p.Stock, p.TipoProducto,
           c.NombreCategoria, c.Tipo AS TipoCategoria,
           pl.FrecuenciaRiego, pl.NivelLuz, pl.TamanoAproximado, pl.NivelDificultad,
