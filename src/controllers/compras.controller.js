@@ -148,7 +148,13 @@ async function realizarCompra(req, res) {
       });
     }
 
-    res.json({ success: true, idCompra, numeroOrden: idCompra, trackingNumber });
+    res.json({
+      success: true,
+      idCompra,
+      numeroOrden: idCompra,
+      trackingNumber,
+      direccionEntrega: direccionFinal
+    });
   } catch (error) {
     console.error('Error al realizar compra:', error);
     res.status(500).json({ success: false, message: 'Error al procesar la compra' });
