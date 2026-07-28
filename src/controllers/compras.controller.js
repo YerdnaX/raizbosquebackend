@@ -5,6 +5,8 @@ const PROVEDOR_ENTREGAS_API_URL = process.env.PROVEDOR_ENTREGAS_API_URL || 'http
 const PROVEDOR_ENTREGAS_TIMEOUT_MS = 5000;
 const PROVEDOR_CUPONES_API_URL = process.env.PROVEDOR_CUPONES_API_URL || 'http://localhost:8004';
 const PROVEDOR_CUPONES_TIMEOUT_MS = 5000;
+const PROVEDOR_BANCO_API_URL = process.env.PROVEDOR_BANCO_API_URL || 'http://localhost:8005';
+const PROVEDOR_BANCO_TIMEOUT_MS = 5000;
 
 async function resolverDireccionEntrega({ direccionEntrega, ubicacion }) {
   if (ubicacion) {
@@ -135,6 +137,91 @@ async function validarCuponConProvedor(codigoCupon) {
   }
 }
 
+function validarMetodoPago(metodoPago) {
+  if (!metodoPago || typeof metodoPago !== 'object') {
+    return { error: 'Debe indicar el metodo de pago' };
+  }
+
+  const tieneTarjeta = !!metodoPago.tarjeta;
+  const tieneSinpe = !!metodoPago.sinpe;
+
+  if (tieneTarjeta === tieneSinpe) {
+    return { error: 'Debe indicar un solo metodo de pago' };
+  }
+
+  if (tieneTarjeta) {
+    const datosTarjeta = metodoPago.tarjeta.tarjeta;
+    const propietario = metodoPago.tarjeta.propietario;
+
+    if (
+      !datosTarjeta?.identificador ||
+      !datosTarjeta?.cvv ||
+      !datosTarjeta?.fechaVencimiento ||
+      !propietario?.nombre
+    ) {
+      return { error: 'Faltan datos de la tarjeta' };
+    }
+
+    return {
+      tipo: 'tarjeta',
+      endpoint: '/tarjeta/pago',
+      body: metodoPago.tarjeta,
+    };
+  }
+
+  if (!metodoPago.sinpe.telefono) {
+    return { error: 'Faltan datos de SINPE' };
+  }
+
+  return {
+    tipo: 'sinpe',
+    endpoint: '/sinpe/pago',
+    body: metodoPago.sinpe,
+  };
+}
+
+async function pagarConProvedorBanco(metodoPago, monto) {
+  const validacion = validarMetodoPago(metodoPago);
+  if (validacion.error) {
+    return { error: validacion.error };
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), PROVEDOR_BANCO_TIMEOUT_MS);
+
+  try {
+    const respuesta = await fetch(`${PROVEDOR_BANCO_API_URL}${validacion.endpoint}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        monto,
+        ...validacion.body,
+      }),
+      signal: controller.signal,
+    });
+
+    const resultado = await respuesta.json().catch(() => ({}));
+
+    if (!respuesta.ok || !resultado.success) {
+      return { error: resultado.message || 'No se pudo procesar el pago' };
+    }
+
+    return {
+      pago: {
+        tipo: validacion.tipo,
+        idPago: resultado.idPago,
+      },
+    };
+  } catch (error) {
+    console.error('No se pudo procesar pago con provedor banco:', error.message);
+    return { error: 'No se pudo validar el pago' };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 function redondearMonto(monto) {
   return Math.round(monto * 100) / 100;
 }
@@ -228,10 +315,15 @@ async function obtenerResumenCompra(req, res) {
 }
 
 async function realizarCompra(req, res) {
-  const { idUsuario, metodoEntrega, direccionEntrega, ubicacion, codigoCupon } = req.body;
+  const { idUsuario, metodoEntrega, direccionEntrega, ubicacion, codigoCupon, metodoPago } = req.body;
 
   if (!idUsuario || !metodoEntrega) {
     return res.status(400).json({ success: false, message: 'Faltan datos requeridos' });
+  }
+
+  const validacionPago = validarMetodoPago(metodoPago);
+  if (validacionPago.error) {
+    return res.status(400).json({ success: false, message: validacionPago.error });
   }
 
   let direccionFinal = null;
@@ -249,6 +341,11 @@ async function realizarCompra(req, res) {
 
     if (resumen.error) {
       return res.status(400).json({ success: false, message: resumen.error });
+    }
+
+    const resultadoPago = await pagarConProvedorBanco(metodoPago, resumen.total);
+    if (resultadoPago.error) {
+      return res.status(400).json({ success: false, message: resultadoPago.error });
     }
 
     const tieneCamposCupon = await comprasTieneCamposCupon(pool);
