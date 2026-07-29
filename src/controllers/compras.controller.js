@@ -9,6 +9,9 @@ const PROVEDOR_CUPONES_TIMEOUT_MS = 5000;
 const PROVEDOR_BANCO_API_URL = process.env.PROVEDOR_BANCO_API_URL || 'http://localhost:8005';
 const PROVEDOR_BANCO_TIMEOUT_MS = 5000;
 
+const PAYPAL_APP_RETURN_SCHEME = process.env.PAYPAL_APP_RETURN_SCHEME || 'raizbosque://paypal-retorno';
+const PAYPAL_APP_CANCEL_SCHEME = process.env.PAYPAL_APP_CANCEL_SCHEME || 'raizbosque://paypal-cancelado';
+
 async function resolverDireccionEntrega({ direccionEntrega, ubicacion }) {
   if (ubicacion) {
     const { idsSeleccionados, direccionExacta } = ubicacion;
@@ -565,10 +568,40 @@ async function obtenerHistorial(req, res) {
   }
 }
 
+function construirPaginaRebote(esquemaDestino) {
+  // PayPal no siempre redirige de forma confiable a un esquema personalizado (raizbosque://).
+  // Esta pagina HTTPS intermedia si redirige de forma confiable, y de ahi salta al esquema de la app.
+  return `<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <title>Redirigiendo...</title>
+  </head>
+  <body>
+    <p>Volviendo a la aplicacion...</p>
+    <script>
+      window.location.replace(${JSON.stringify(esquemaDestino)} + window.location.search);
+    </script>
+  </body>
+</html>`;
+}
+
+function retornoPaypal(req, res) {
+  res.set('Content-Type', 'text/html');
+  res.send(construirPaginaRebote(PAYPAL_APP_RETURN_SCHEME));
+}
+
+function canceladoPaypal(req, res) {
+  res.set('Content-Type', 'text/html');
+  res.send(construirPaginaRebote(PAYPAL_APP_CANCEL_SCHEME));
+}
+
 module.exports = {
   realizarCompra,
   obtenerHistorial,
   obtenerResumenCompra,
   crearOrdenPaypal,
   capturarPaypal,
+  retornoPaypal,
+  canceladoPaypal,
 };
