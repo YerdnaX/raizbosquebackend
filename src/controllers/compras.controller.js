@@ -9,8 +9,9 @@ const PROVEDOR_CUPONES_TIMEOUT_MS = 5000;
 const PROVEDOR_BANCO_API_URL = process.env.PROVEDOR_BANCO_API_URL || 'http://localhost:8005';
 const PROVEDOR_BANCO_TIMEOUT_MS = 5000;
 
-const PAYPAL_APP_RETURN_SCHEME = process.env.PAYPAL_APP_RETURN_SCHEME || 'raizbosque://paypal-retorno';
-const PAYPAL_APP_CANCEL_SCHEME = process.env.PAYPAL_APP_CANCEL_SCHEME || 'raizbosque://paypal-cancelado';
+// Paginas HTTPS propias que PayPal si redirige de forma confiable (ver retornoPaypal/canceladoPaypal).
+const PAYPAL_RETURN_URL = process.env.PAYPAL_RETURN_URL || `http://localhost:${process.env.PORT || 3000}/api/compras/paypal/retorno`;
+const PAYPAL_CANCEL_URL = process.env.PAYPAL_CANCEL_URL || `http://localhost:${process.env.PORT || 3000}/api/compras/paypal/cancelado`;
 
 async function resolverDireccionEntrega({ direccionEntrega, ubicacion }) {
   if (ubicacion) {
@@ -446,9 +447,9 @@ async function realizarCompra(req, res) {
 }
 
 async function crearOrdenPaypal(req, res) {
-  const { idUsuario, codigoCupon } = req.body;
+  const { idUsuario, codigoCupon, urlRetorno, urlCancelado } = req.body;
 
-  if (!idUsuario) {
+  if (!idUsuario || !urlRetorno || !urlCancelado) {
     return res.status(400).json({ success: false, message: 'Faltan datos requeridos' });
   }
 
@@ -463,7 +464,13 @@ async function crearOrdenPaypal(req, res) {
     const tipoCambio = await obtenerTipoCambioVenta();
     const montoUSD = redondearMonto(resumen.total / tipoCambio.valor);
 
-    const orden = await paypalService.crearOrden(montoUSD);
+    // return_url/cancel_url deben ser paginas HTTPS propias (ver retornoPaypal/canceladoPaypal):
+    // ahi es donde se rebota hacia el deep link real de la app (urlRetorno/urlCancelado),
+    // que varia segun si se corre en Expo Go (exp://...) o en un build standalone (raizbosque://...).
+    const returnUrl = `${PAYPAL_RETURN_URL}?destino=${encodeURIComponent(urlRetorno)}`;
+    const cancelUrl = `${PAYPAL_CANCEL_URL}?destino=${encodeURIComponent(urlCancelado)}`;
+
+    const orden = await paypalService.crearOrden(montoUSD, returnUrl, cancelUrl);
 
     res.json({
       success: true,
@@ -568,10 +575,13 @@ async function obtenerHistorial(req, res) {
   }
 }
 
-function construirDestinoApp(esquemaBase, req) {
-  const indice = req.originalUrl.indexOf('?');
-  const queryString = indice >= 0 ? req.originalUrl.slice(indice) : '';
-  return `${esquemaBase}${queryString}`;
+function construirDestinoApp(req) {
+  const { destino, ...resto } = req.query;
+  if (!destino) return null;
+
+  const parametrosRestantes = new URLSearchParams(resto).toString();
+  const separador = destino.includes('?') ? '&' : '?';
+  return parametrosRestantes ? `${destino}${separador}${parametrosRestantes}` : destino;
 }
 
 function construirPaginaRebote(destino) {
@@ -608,13 +618,19 @@ function construirPaginaRebote(destino) {
 }
 
 function retornoPaypal(req, res) {
-  const destino = construirDestinoApp(PAYPAL_APP_RETURN_SCHEME, req);
+  const destino = construirDestinoApp(req);
+  if (!destino) {
+    return res.status(400).send('Falta el parametro destino');
+  }
   res.set('Content-Type', 'text/html');
   res.send(construirPaginaRebote(destino));
 }
 
 function canceladoPaypal(req, res) {
-  const destino = construirDestinoApp(PAYPAL_APP_CANCEL_SCHEME, req);
+  const destino = construirDestinoApp(req);
+  if (!destino) {
+    return res.status(400).send('Falta el parametro destino');
+  }
   res.set('Content-Type', 'text/html');
   res.send(construirPaginaRebote(destino));
 }

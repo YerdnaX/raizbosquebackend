@@ -1,8 +1,6 @@
 const PAYPAL_API_BASE = process.env.PAYPAL_API_BASE || 'https://api-m.sandbox.paypal.com';
 const PAYPAL_CLIENT_ID = process.env.PAYPAL_CLIENT_ID;
 const PAYPAL_CLIENT_SECRET = process.env.PAYPAL_CLIENT_SECRET;
-const PAYPAL_RETURN_URL = process.env.PAYPAL_RETURN_URL || 'raizbosque://paypal-retorno';
-const PAYPAL_CANCEL_URL = process.env.PAYPAL_CANCEL_URL || 'raizbosque://paypal-cancelado';
 
 let tokenCache = { accessToken: null, expiraEn: 0 };
 
@@ -37,7 +35,7 @@ async function obtenerAccessToken() {
   return tokenCache.accessToken;
 }
 
-async function crearOrden(montoUSD) {
+async function crearOrden(montoUSD, returnUrl, cancelUrl) {
   const accessToken = await obtenerAccessToken();
 
   const respuesta = await fetch(`${PAYPAL_API_BASE}/v2/checkout/orders`, {
@@ -60,8 +58,8 @@ async function crearOrden(montoUSD) {
         paypal: {
           experience_context: {
             brand_name: 'Raices Cafe & Vivero',
-            return_url: PAYPAL_RETURN_URL,
-            cancel_url: PAYPAL_CANCEL_URL,
+            return_url: returnUrl,
+            cancel_url: cancelUrl,
             user_action: 'PAY_NOW',
             shipping_preference: 'NO_SHIPPING',
           },
