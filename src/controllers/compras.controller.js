@@ -1,5 +1,6 @@
 const { getConnection, sql } = require('../config/db');
 const { validarCadenaUbicacion, construirDireccionEntrega } = require('../services/ubicacionesService');
+const paypalService = require('../services/paypalService');
 
 const PROVEDOR_ENTREGAS_API_URL = process.env.PROVEDOR_ENTREGAS_API_URL || 'http://localhost:8003';
 const PROVEDOR_ENTREGAS_TIMEOUT_MS = 5000;
@@ -226,6 +227,22 @@ function redondearMonto(monto) {
   return Math.round(monto * 100) / 100;
 }
 
+async function obtenerTipoCambioVenta() {
+  const respuesta = await fetch('https://api.hacienda.go.cr/indicadores/tc');
+  if (!respuesta.ok) {
+    throw new Error('No se pudo consultar el tipo de cambio');
+  }
+
+  const datos = await respuesta.json();
+  const venta = datos?.dolar?.venta;
+
+  if (!venta?.valor) {
+    throw new Error('Respuesta de tipo de cambio no valida');
+  }
+
+  return { valor: venta.valor, fecha: venta.fecha };
+}
+
 function calcularMontoDescuento(cupon, subtotal) {
   if (!cupon) return 0;
 
@@ -314,6 +331,74 @@ async function obtenerResumenCompra(req, res) {
   }
 }
 
+async function finalizarCompra(pool, { idUsuario, metodoEntrega, direccionFinal, resumen }) {
+  const tieneCamposCupon = await comprasTieneCamposCupon(pool);
+  const compraRequest = pool.request()
+    .input('idUsuario', sql.Int, idUsuario)
+    .input('subtotal', sql.Decimal(10, 2), resumen.subtotal)
+    .input('impuesto', sql.Decimal(10, 2), resumen.impuesto)
+    .input('total', sql.Decimal(10, 2), resumen.total)
+    .input('metodoEntrega', sql.VarChar(50), metodoEntrega)
+    .input('direccionEntrega', sql.VarChar(300), direccionFinal);
+
+  let compraResult;
+  if (tieneCamposCupon) {
+    compraResult = await compraRequest
+      .input('codigoCupon', sql.VarChar(50), resumen.cupon ? resumen.cupon.codigo : null)
+      .input('descuento', sql.Decimal(10, 2), resumen.descuento)
+      .query(`
+        INSERT INTO Compras (IdUsuario, Subtotal, Impuesto, Total, MetodoEntrega, DireccionEntrega, CodigoCupon, Descuento)
+        OUTPUT INSERTED.IdCompra
+        VALUES (@idUsuario, @subtotal, @impuesto, @total, @metodoEntrega, @direccionEntrega, @codigoCupon, @descuento)
+      `);
+  } else {
+    compraResult = await compraRequest.query(`
+      INSERT INTO Compras (IdUsuario, Subtotal, Impuesto, Total, MetodoEntrega, DireccionEntrega)
+      OUTPUT INSERTED.IdCompra
+      VALUES (@idUsuario, @subtotal, @impuesto, @total, @metodoEntrega, @direccionEntrega)
+    `);
+  }
+
+  const idCompra = compraResult.recordset[0].IdCompra;
+
+  for (const item of resumen.items) {
+    await pool.request()
+      .input('idCompra', sql.Int, idCompra)
+      .input('idProducto', sql.Int, item.IdProducto)
+      .input('cantidad', sql.Int, item.Cantidad)
+      .input('precioUnitario', sql.Decimal(10, 2), parseFloat(item.PrecioUnitario))
+      .input('subtotalItem', sql.Decimal(10, 2), parseFloat(item.Subtotal))
+      .query(`
+        INSERT INTO CompraDetalle (IdCompra, IdProducto, Cantidad, PrecioUnitario, Subtotal)
+        VALUES (@idCompra, @idProducto, @cantidad, @precioUnitario, @subtotalItem)
+      `);
+  }
+
+  await pool.request()
+    .input('idCarrito', sql.Int, resumen.idCarrito)
+    .query(`UPDATE Carritos SET Estado = 'Completado' WHERE IdCarrito = @idCarrito`);
+
+  let trackingNumber = null;
+  if (metodoEntrega === 'Domicilio') {
+    trackingNumber = await registrarEntregaConProvedor({
+      numeroOrden: idCompra,
+      direccionEntrega: direccionFinal,
+    });
+  }
+
+  return {
+    idCompra,
+    numeroOrden: idCompra,
+    trackingNumber,
+    direccionEntrega: direccionFinal,
+    subtotal: resumen.subtotal,
+    descuento: resumen.descuento,
+    impuesto: resumen.impuesto,
+    total: resumen.total,
+    cupon: resumen.cupon,
+  };
+}
+
 async function realizarCompra(req, res) {
   const { idUsuario, metodoEntrega, direccionEntrega, ubicacion, codigoCupon, metodoPago } = req.body;
 
@@ -348,75 +433,82 @@ async function realizarCompra(req, res) {
       return res.status(400).json({ success: false, message: resultadoPago.error });
     }
 
-    const tieneCamposCupon = await comprasTieneCamposCupon(pool);
-    const compraRequest = pool.request()
-      .input('idUsuario', sql.Int, idUsuario)
-      .input('subtotal', sql.Decimal(10, 2), resumen.subtotal)
-      .input('impuesto', sql.Decimal(10, 2), resumen.impuesto)
-      .input('total', sql.Decimal(10, 2), resumen.total)
-      .input('metodoEntrega', sql.VarChar(50), metodoEntrega)
-      .input('direccionEntrega', sql.VarChar(300), direccionFinal);
+    const resultado = await finalizarCompra(pool, { idUsuario, metodoEntrega, direccionFinal, resumen });
 
-    let compraResult;
-    if (tieneCamposCupon) {
-      compraResult = await compraRequest
-        .input('codigoCupon', sql.VarChar(50), resumen.cupon ? resumen.cupon.codigo : null)
-        .input('descuento', sql.Decimal(10, 2), resumen.descuento)
-        .query(`
-          INSERT INTO Compras (IdUsuario, Subtotal, Impuesto, Total, MetodoEntrega, DireccionEntrega, CodigoCupon, Descuento)
-          OUTPUT INSERTED.IdCompra
-          VALUES (@idUsuario, @subtotal, @impuesto, @total, @metodoEntrega, @direccionEntrega, @codigoCupon, @descuento)
-        `);
-    } else {
-      compraResult = await compraRequest.query(`
-        INSERT INTO Compras (IdUsuario, Subtotal, Impuesto, Total, MetodoEntrega, DireccionEntrega)
-        OUTPUT INSERTED.IdCompra
-        VALUES (@idUsuario, @subtotal, @impuesto, @total, @metodoEntrega, @direccionEntrega)
-      `);
-    }
-
-    const idCompra = compraResult.recordset[0].IdCompra;
-
-    for (const item of resumen.items) {
-      await pool.request()
-        .input('idCompra', sql.Int, idCompra)
-        .input('idProducto', sql.Int, item.IdProducto)
-        .input('cantidad', sql.Int, item.Cantidad)
-        .input('precioUnitario', sql.Decimal(10, 2), parseFloat(item.PrecioUnitario))
-        .input('subtotalItem', sql.Decimal(10, 2), parseFloat(item.Subtotal))
-        .query(`
-          INSERT INTO CompraDetalle (IdCompra, IdProducto, Cantidad, PrecioUnitario, Subtotal)
-          VALUES (@idCompra, @idProducto, @cantidad, @precioUnitario, @subtotalItem)
-        `);
-    }
-
-    await pool.request()
-      .input('idCarrito', sql.Int, resumen.idCarrito)
-      .query(`UPDATE Carritos SET Estado = 'Completado' WHERE IdCarrito = @idCarrito`);
-
-    let trackingNumber = null;
-    if (metodoEntrega === 'Domicilio') {
-      trackingNumber = await registrarEntregaConProvedor({
-        numeroOrden: idCompra,
-        direccionEntrega: direccionFinal,
-      });
-    }
-
-    res.json({
-      success: true,
-      idCompra,
-      numeroOrden: idCompra,
-      trackingNumber,
-      direccionEntrega: direccionFinal,
-      subtotal: resumen.subtotal,
-      descuento: resumen.descuento,
-      impuesto: resumen.impuesto,
-      total: resumen.total,
-      cupon: resumen.cupon,
-    });
+    res.json({ success: true, ...resultado });
   } catch (error) {
     console.error('Error al realizar compra:', error);
     res.status(500).json({ success: false, message: 'Error al procesar la compra' });
+  }
+}
+
+async function crearOrdenPaypal(req, res) {
+  const { idUsuario, codigoCupon } = req.body;
+
+  if (!idUsuario) {
+    return res.status(400).json({ success: false, message: 'Faltan datos requeridos' });
+  }
+
+  try {
+    const pool = await getConnection();
+    const resumen = await construirResumenCompra(pool, idUsuario, codigoCupon);
+
+    if (resumen.error) {
+      return res.status(400).json({ success: false, message: resumen.error });
+    }
+
+    const tipoCambio = await obtenerTipoCambioVenta();
+    const montoUSD = redondearMonto(resumen.total / tipoCambio.valor);
+
+    const orden = await paypalService.crearOrden(montoUSD);
+
+    res.json({
+      success: true,
+      orderId: orden.orderId,
+      approveUrl: orden.approveUrl,
+      montoUSD,
+    });
+  } catch (error) {
+    console.error('Error al crear orden de PayPal:', error);
+    res.status(500).json({ success: false, message: 'No se pudo iniciar el pago con PayPal' });
+  }
+}
+
+async function capturarPaypal(req, res) {
+  const { idUsuario, metodoEntrega, direccionEntrega, ubicacion, codigoCupon, orderId } = req.body;
+
+  if (!idUsuario || !metodoEntrega || !orderId) {
+    return res.status(400).json({ success: false, message: 'Faltan datos requeridos' });
+  }
+
+  let direccionFinal = null;
+  if (metodoEntrega === 'Domicilio') {
+    const resultado = await resolverDireccionEntrega({ direccionEntrega, ubicacion });
+    if (resultado.error) {
+      return res.status(400).json({ success: false, message: resultado.error });
+    }
+    direccionFinal = resultado.direccion;
+  }
+
+  try {
+    const pool = await getConnection();
+    const resumen = await construirResumenCompra(pool, idUsuario, codigoCupon);
+
+    if (resumen.error) {
+      return res.status(400).json({ success: false, message: resumen.error });
+    }
+
+    const captura = await paypalService.capturarOrden(orderId);
+    if (captura.estado !== 'COMPLETED') {
+      return res.status(400).json({ success: false, message: captura.mensaje || 'El pago con PayPal no se completo' });
+    }
+
+    const resultado = await finalizarCompra(pool, { idUsuario, metodoEntrega, direccionFinal, resumen });
+
+    res.json({ success: true, ...resultado });
+  } catch (error) {
+    console.error('Error al capturar pago de PayPal:', error);
+    res.status(500).json({ success: false, message: 'No se pudo confirmar el pago con PayPal' });
   }
 }
 
@@ -473,4 +565,10 @@ async function obtenerHistorial(req, res) {
   }
 }
 
-module.exports = { realizarCompra, obtenerHistorial, obtenerResumenCompra };
+module.exports = {
+  realizarCompra,
+  obtenerHistorial,
+  obtenerResumenCompra,
+  crearOrdenPaypal,
+  capturarPaypal,
+};
