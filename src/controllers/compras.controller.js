@@ -568,32 +568,55 @@ async function obtenerHistorial(req, res) {
   }
 }
 
-function construirPaginaRebote(esquemaDestino) {
-  // PayPal no siempre redirige de forma confiable a un esquema personalizado (raizbosque://).
-  // Esta pagina HTTPS intermedia si redirige de forma confiable, y de ahi salta al esquema de la app.
+function construirDestinoApp(esquemaBase, req) {
+  const indice = req.originalUrl.indexOf('?');
+  const queryString = indice >= 0 ? req.originalUrl.slice(indice) : '';
+  return `${esquemaBase}${queryString}`;
+}
+
+function construirPaginaRebote(destino) {
+  // Chrome en Android bloquea la navegacion automatica (sin gesto del usuario) hacia un
+  // esquema personalizado (raizbosque://), por eso se necesita un boton que el usuario toque.
   return `<!DOCTYPE html>
 <html lang="es">
   <head>
     <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Redirigiendo...</title>
+    <style>
+      body { font-family: sans-serif; text-align: center; padding: 48px 20px; background: #f0eee8; color: #1c1c18; }
+      a.boton {
+        display: inline-block;
+        margin-top: 20px;
+        padding: 14px 28px;
+        background-color: #1b3022;
+        color: #ffffff;
+        text-decoration: none;
+        border-radius: 8px;
+        font-weight: bold;
+      }
+    </style>
   </head>
   <body>
-    <p>Volviendo a la aplicacion...</p>
+    <p>Pago procesado. Si la aplicacion no se abre sola, toca el boton.</p>
+    <a class="boton" id="volver" href="${destino}">Volver a la aplicacion</a>
     <script>
-      window.location.replace(${JSON.stringify(esquemaDestino)} + window.location.search);
+      window.location.href = ${JSON.stringify(destino)};
     </script>
   </body>
 </html>`;
 }
 
 function retornoPaypal(req, res) {
+  const destino = construirDestinoApp(PAYPAL_APP_RETURN_SCHEME, req);
   res.set('Content-Type', 'text/html');
-  res.send(construirPaginaRebote(PAYPAL_APP_RETURN_SCHEME));
+  res.send(construirPaginaRebote(destino));
 }
 
 function canceladoPaypal(req, res) {
+  const destino = construirDestinoApp(PAYPAL_APP_CANCEL_SCHEME, req);
   res.set('Content-Type', 'text/html');
-  res.send(construirPaginaRebote(PAYPAL_APP_CANCEL_SCHEME));
+  res.send(construirPaginaRebote(destino));
 }
 
 module.exports = {
